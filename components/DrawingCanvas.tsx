@@ -55,18 +55,48 @@ export default function DrawingCanvas({
     onPixelFill(key, selectedColor)
   }
 
-  const handleMouseDown = (row: number, col: number) => {
+  const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
+    e.preventDefault()
+    if (isColorPickerMode) {
+      handlePixelClick(row, col)
+      return
+    }
     setIsDrawing(true)
     handlePixelClick(row, col)
   }
 
-  const handleMouseMove = (row: number, col: number) => {
-    if (isDrawing) {
+  const handleCanvasMouseMove = (e: React.MouseEvent) => {
+    if (!isDrawing || !containerRef.current || isColorPickerMode) return
+    
+    const rect = containerRef.current.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    
+    const row = Math.floor(y / pixelSize)
+    
+    // For brick pattern, need to account for offset when calculating column
+    let col: number
+    if (pattern === 'bricks' && row % 2 === 1) {
+      // For offset rows, adjust column calculation
+      const adjustedX = x - pixelSize / 2
+      col = Math.floor(adjustedX / pixelSize)
+      // Clamp to valid range
+      if (col < 0) col = 0
+      if (col >= dimensions.cols) col = dimensions.cols - 1
+    } else {
+      col = Math.floor(x / pixelSize)
+    }
+    
+    if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
       handlePixelClick(row, col)
     }
   }
 
   const handleMouseUp = () => {
+    setIsDrawing(false)
+  }
+
+  const handleMouseLeave = () => {
     setIsDrawing(false)
   }
 
@@ -86,8 +116,20 @@ export default function DrawingCanvas({
       const x = touch.clientX - rect.left
       const y = touch.clientY - rect.top
       
-      const col = Math.floor(x / pixelSize)
       const row = Math.floor(y / pixelSize)
+      
+      // For brick pattern, need to account for offset when calculating column
+      let col: number
+      if (pattern === 'bricks' && row % 2 === 1) {
+        // For offset rows, adjust column calculation
+        const adjustedX = x - pixelSize / 2
+        col = Math.floor(adjustedX / pixelSize)
+        // Clamp to valid range
+        if (col < 0) col = 0
+        if (col >= dimensions.cols) col = dimensions.cols - 1
+      } else {
+        col = Math.floor(x / pixelSize)
+      }
       
       if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
         handlePixelClick(row, col)
@@ -113,10 +155,7 @@ export default function DrawingCanvas({
           backgroundColor: color,
           border: '1px solid #ddd',
         }}
-        onMouseDown={() => handleMouseDown(row, col)}
-        onMouseMove={() => handleMouseMove(row, col)}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onMouseDown={(e) => handleMouseDown(e, row, col)}
         onTouchStart={(e) => handleTouchStart(e, row, col)}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -141,10 +180,7 @@ export default function DrawingCanvas({
           border: '1px solid #ddd',
           transform: isOffset ? `translateX(${offset}px)` : 'none',
         }}
-        onMouseDown={() => handleMouseDown(row, col)}
-        onMouseMove={() => handleMouseMove(row, col)}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onMouseDown={(e) => handleMouseDown(e, row, col)}
         onTouchStart={(e) => handleTouchStart(e, row, col)}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -165,6 +201,9 @@ export default function DrawingCanvas({
         position: 'relative',
         width: pattern === 'bricks' ? `${dimensions.cols * pixelSize + pixelSize / 2}px` : 'auto',
       }}
+      onMouseMove={handleCanvasMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseLeave}
     >
       {Array.from({ length: dimensions.rows }).map((_, row) =>
         Array.from({ length: dimensions.cols }).map((_, col) =>
