@@ -9,3 +9,11 @@ export interface DrawingData {
   grid: { [key: string]: string }
 }
 
+export interface CompressedDrawingData {
+  pattern: MatrixPattern
+  pixelSize: number
+  canvasWidth: number
+  canvasHeight: number
+  colors: { [key: string]: number }
+  grid: string[]
+}

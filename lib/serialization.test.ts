@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { serializeDrawing, deserializeDrawing } from './serialization'
+import { serializeDrawing, deserializeDrawing, compressColor, decompressColor } from './serialization'
 import type { DrawingData } from '@/lib/types'
 
 describe('serializeDrawing', () => {
@@ -17,7 +17,7 @@ describe('serializeDrawing', () => {
     }
 
     const result = serializeDrawing(data)
-    expect(result).toBe('s|15|20|20|#000000,#ff0000|0,0:#000000;1,1:#ff0000')
+    expect(result).toBe('s|15|20|20|0,ff0000|0,0:0;1,1:ff0000')
   })
 
   it('should serialize bricks pattern', () => {
@@ -33,7 +33,7 @@ describe('serializeDrawing', () => {
     }
 
     const result = serializeDrawing(data)
-    expect(result).toBe('b|20|32|32|#00ff00|5,10:#00ff00')
+    expect(result).toBe('b|20|32|32|ff00|5,10:ff00')
   })
 
   it('should serialize bricksVertical pattern', () => {
@@ -67,8 +67,8 @@ describe('serializeDrawing', () => {
 
     const result = serializeDrawing(data)
     // Should only include non-white pixels
-    expect(result).toContain('0,0:#000000')
-    expect(result).toContain('3,3:#ff0000')
+    expect(result).toContain('0,0:0')
+    expect(result).toContain('3,3:ff0000')
     expect(result).not.toContain('1,1')
     expect(result).not.toContain('2,2')
   })
@@ -103,13 +103,13 @@ describe('serializeDrawing', () => {
     }
 
     const result = serializeDrawing(data)
-    expect(result).toContain('#000000,#ff0000,#00ff00,#0000ff')
+    expect(result).toContain('0,ff0000,ff00,ff')
   })
 })
 
 describe('deserializeDrawing', () => {
   it('should deserialize a basic drawing', () => {
-    const compact = 's|15|20|20|#000000,#ff0000|0,0:#000000;1,1:#ff0000'
+    const compact = 's|15|20|20|0,ff0000|0,0:0;1,1:ff0000'
     const result = deserializeDrawing(compact)
 
     expect(result).not.toBeNull()
@@ -128,7 +128,7 @@ describe('deserializeDrawing', () => {
   })
 
   it('should deserialize bricks pattern', () => {
-    const compact = 'b|20|32|32|#00ff00|5,10:#00ff00'
+    const compact = 'b|20|32|32|ff00|5,10:ff00'
     const result = deserializeDrawing(compact)
 
     expect(result).not.toBeNull()
@@ -164,7 +164,7 @@ describe('deserializeDrawing', () => {
   })
 
   it('should handle multiple grid entries', () => {
-    const compact = 's|15|20|20|#000000|0,0:#000000;5,5:#000000;10,10:#000000'
+    const compact = 's|15|20|20|0|0,0:0;5,5:0;10,10:0'
     const result = deserializeDrawing(compact)
 
     expect(result).not.toBeNull()
@@ -263,3 +263,30 @@ describe('serializeDrawing and deserializeDrawing roundtrip', () => {
   })
 })
 
+describe('compressColor', () => {
+  it('should compress a color string to a number', () => {
+    const color = '#000000'
+    const result = compressColor(color)
+    expect(result).toBe('0')
+  })
+
+  it('should compress different color string to a number', () => {
+    const color = '#3a6ea5'
+    const result = compressColor(color)
+    expect(result).toBe('3a6ea5')
+  })
+})
+
+describe('decompressColor', () => {
+  it('should decompress a color number to a string', () => {
+    const compressedColor = '0'
+    const result = decompressColor(compressedColor)
+    expect(result).toBe('#000000')
+  })
+
+  it('should decompress a different color number to a string', () => {
+    const compressedColor = '3a6ea5'
+    const result = decompressColor(compressedColor)
+    expect(result).toBe('#3a6ea5')
+  })
+})

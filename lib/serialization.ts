@@ -11,14 +11,15 @@ export function serializeDrawing(data: DrawingData): string {
   // Pattern: 's'=squares, 'b'=bricks, 'v'=bricksVertical
   const patternChar = data.pattern === 'squares' ? 's' : data.pattern === 'bricks' ? 'b' : 'v'
   
-  // Colors as array (more compact than object)
-  const colorsArray = Object.values(data.colors)
+  const colorsArray = Object.entries(data.colors).map(([key, color]) => {
+    return `${compressColor(color)}`
+  })
   
   // Grid: only store non-white pixels in compact format "row,col:color"
   const gridEntries: string[] = []
   Object.entries(data.grid).forEach(([key, color]) => {
     if (color && color !== '#ffffff' && color !== '#fff') {
-      gridEntries.push(`${key}:${color}`)
+      gridEntries.push(`${key}:${compressColor(color)}`)
     }
   })
   
@@ -55,7 +56,7 @@ export function deserializeDrawing(compact: string): DrawingData | null {
     const canvasHeight = parseInt(parts[3]) || 20
     
     const colorsArray = parts[4] ? parts[4].split(',').filter(Boolean) : []
-    const colors = colorsArray.reduce((acc, color, idx) => {
+    const colors = colorsArray.map(decompressColor).reduce((acc, color, idx) => {
       acc[idx.toString()] = color
       return acc
     }, {} as { [key: string]: string })
@@ -65,7 +66,7 @@ export function deserializeDrawing(compact: string): DrawingData | null {
       parts[5].split(';').forEach((entry) => {
         const [key, color] = entry.split(':')
         if (key && color) {
-          grid[key] = color
+          grid[key] = decompressColor(color)
         }
       })
     }
@@ -176,3 +177,12 @@ export async function decodeDrawing(encoded: string): Promise<DrawingData | null
   }
 }
 
+export function compressColor(color: string): string {
+  const num = parseInt(color.replace('#', ''), 16)
+  return num.toString(16)
+}
+
+export function decompressColor(compressedColor: string): string {
+  const num = parseInt(compressedColor, 16)
+  return `#${num.toString(16).padStart(6, '0')}`
+}
