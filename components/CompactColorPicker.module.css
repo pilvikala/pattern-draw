@@ -1,0 +1,71 @@
+.compactPicker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.colorPreview {
+  width: 48px;
+  height: 48px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.colorInput {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.saveButton,
+.pickerButton {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 2px solid #ddd;
+  background: white;
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.saveButton:hover,
+.pickerButton:hover {
+  background: #f5f5f5;
+  border-color: #0070f3;
+}
+
+.pickerButton.active {
+  background: #ff6b6b;
+  border-color: #ff6b6b;
+  color: white;
+  animation: pulse 1s infinite;
+}
+
+.pickerIcon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+

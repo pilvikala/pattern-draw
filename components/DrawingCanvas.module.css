@@ -3,11 +3,18 @@
   background: #f9f9f9;
   border: 2px solid #ddd;
   border-radius: 4px;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .pixel {
   cursor: crosshair;
   transition: opacity 0.1s;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .canvas.colorPickerMode .pixel {
@@ -20,5 +27,13 @@
 
 .pixel:active {
   opacity: 0.6;
+}
+
+@media (max-width: 767px) {
+  .canvas {
+    border: none;
+    border-radius: 0;
+    background: #f5f5f5;
+  }
 }
 

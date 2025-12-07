@@ -3,8 +3,10 @@
 import { useState, useEffect } from 'react'
 import DrawingCanvas from '@/components/DrawingCanvas'
 import ColorPicker from '@/components/ColorPicker'
+import CompactColorPicker from '@/components/CompactColorPicker'
 import ColorPalette from '@/components/ColorPalette'
 import Controls from '@/components/Controls'
+import MobileMenu from '@/components/MobileMenu'
 import styles from './page.module.css'
 
 export type MatrixPattern = 'squares' | 'bricks'
@@ -197,9 +199,54 @@ export default function Home() {
   return (
     <main className={styles.main}>
       <div className={styles.container}>
-        <h1 className={styles.title}>Pattern Draw</h1>
-        
-        <div className={styles.toolbar}>
+        <div className={styles.header}>
+          <h1 className={styles.title}>Pattern Draw</h1>
+          <MobileMenu
+            pattern={pattern}
+            pixelSize={pixelSize}
+            onPatternChange={setPattern}
+            onPixelSizeChange={setPixelSize}
+            onClear={handleClear}
+            onShare={handleShare}
+            onDownload={handleDownload}
+            onPrint={handlePrint}
+          />
+        </div>
+
+        <div className={styles.topBar}>
+          <div className={styles.colorTools}>
+            <CompactColorPicker
+              selectedColor={selectedColor}
+              onColorChange={setSelectedColor}
+              onColorSave={handleColorSave}
+              isColorPickerMode={isColorPickerMode}
+              onColorPickerModeToggle={setIsColorPickerMode}
+            />
+            <ColorPalette
+              colors={savedColors}
+              selectedColor={selectedColor}
+              onColorSelect={handleColorSelect}
+              onColorPick={handleColorPick}
+              onColorRemove={(color) => {
+                setSavedColors(savedColors.filter((c) => c !== color))
+              }}
+            />
+          </div>
+        </div>
+
+        <div className={styles.canvasContainer}>
+          <DrawingCanvas
+            pattern={pattern}
+            pixelSize={pixelSize}
+            selectedColor={selectedColor}
+            grid={grid}
+            onPixelFill={handlePixelFill}
+            isColorPickerMode={isColorPickerMode}
+          />
+        </div>
+
+        {/* Desktop controls - hidden on mobile */}
+        <div className={styles.desktopControls}>
           <Controls
             pattern={pattern}
             pixelSize={pixelSize}
@@ -212,33 +259,14 @@ export default function Home() {
           />
         </div>
 
-        <div className={styles.colorSection}>
+        {/* Desktop color section - hidden on mobile */}
+        <div className={styles.desktopColorSection}>
           <ColorPicker
             selectedColor={selectedColor}
             onColorChange={setSelectedColor}
             onColorSave={handleColorSave}
             isColorPickerMode={isColorPickerMode}
             onColorPickerModeToggle={setIsColorPickerMode}
-          />
-          <ColorPalette
-            colors={savedColors}
-            selectedColor={selectedColor}
-            onColorSelect={handleColorSelect}
-            onColorPick={handleColorPick}
-            onColorRemove={(color) => {
-              setSavedColors(savedColors.filter((c) => c !== color))
-            }}
-          />
-        </div>
-
-        <div className={styles.canvasContainer}>
-          <DrawingCanvas
-            pattern={pattern}
-            pixelSize={pixelSize}
-            selectedColor={selectedColor}
-            grid={grid}
-            onPixelFill={handlePixelFill}
-            isColorPickerMode={isColorPickerMode}
           />
         </div>
       </div>

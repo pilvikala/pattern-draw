@@ -1,5 +1,6 @@
 'use client'
 
+import { useRef } from 'react'
 import styles from './ColorPalette.module.css'
 
 interface ColorPaletteProps {
@@ -17,6 +18,30 @@ export default function ColorPalette({
   onColorPick,
   onColorRemove,
 }: ColorPaletteProps) {
+  const longPressTimer = useRef<number | null>(null)
+  const longPressTarget = useRef<string | null>(null)
+
+  const handleTouchStart = (color: string) => {
+    longPressTarget.current = color
+    longPressTimer.current = window.setTimeout(() => {
+      if (longPressTarget.current === color) {
+        onColorRemove(color)
+        longPressTarget.current = null
+      }
+    }, 500)
+  }
+
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+    if (longPressTarget.current) {
+      onColorSelect(longPressTarget.current)
+      longPressTarget.current = null
+    }
+  }
+
   if (colors.length === 0) {
     return (
       <div className={styles.palette}>
@@ -38,15 +63,18 @@ export default function ColorPalette({
             }`}
             style={{ backgroundColor: color }}
             onClick={() => onColorSelect(color)}
+            onTouchStart={() => handleTouchStart(color)}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
             onContextMenu={(e) => {
               e.preventDefault()
               onColorRemove(color)
             }}
-            title={`Left click to select, right click to remove`}
+            title={`Click to select, long-press or right-click to remove`}
           />
         ))}
       </div>
-      <p className={styles.hint}>Click to select, right-click to remove</p>
+      <p className={styles.hint}>Click to select, long-press or right-click to remove</p>
     </div>
   )
 }

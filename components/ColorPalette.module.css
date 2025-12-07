@@ -4,6 +4,17 @@
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   min-width: 280px;
+  flex: 1;
+}
+
+@media (max-width: 767px) {
+  .palette {
+    background: transparent;
+    padding: 0;
+    box-shadow: none;
+    min-width: auto;
+    flex: 0 0 auto;
+  }
 }
 
 .title {
@@ -13,11 +24,28 @@
   color: #333;
 }
 
+@media (max-width: 767px) {
+  .title {
+    display: none;
+  }
+}
+
 .colorGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  display: flex;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0.25rem;
+}
+
+@media (min-width: 768px) {
+  .colorGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+    overflow-x: visible;
+    padding-bottom: 0;
+  }
 }
 
 .colorSwatch {
@@ -27,6 +55,7 @@
   border-radius: 4px;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
+  flex-shrink: 0;
 }
 
 .colorSwatch:hover {
@@ -52,6 +81,12 @@
   color: #666;
   margin-top: 0.5rem;
   text-align: center;
+}
+
+@media (max-width: 767px) {
+  .hint {
+    display: none;
+  }
 }
 
 

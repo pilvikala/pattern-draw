@@ -28,17 +28,33 @@ export default function DrawingCanvas({
   useEffect(() => {
     const updateDimensions = () => {
       if (containerRef.current) {
-        const containerWidth = containerRef.current.clientWidth
-        const containerHeight = Math.min(window.innerHeight - 400, 600)
+        const rect = containerRef.current.getBoundingClientRect()
+        const containerWidth = rect.width
+        const containerHeight = rect.height
+        
+        // For mobile, use full container height; for desktop, limit to reasonable size
+        const isMobile = window.innerWidth < 768
+        const maxHeight = isMobile ? containerHeight : Math.min(containerHeight, 600)
+        
         const cols = Math.floor(containerWidth / pixelSize)
-        const rows = Math.floor(containerHeight / pixelSize)
+        const rows = Math.floor(maxHeight / pixelSize)
         setDimensions({ cols, rows })
       }
     }
 
     updateDimensions()
+    
+    // Use ResizeObserver for better performance
+    const resizeObserver = new ResizeObserver(updateDimensions)
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current)
+    }
+    
     window.addEventListener('resize', updateDimensions)
-    return () => window.removeEventListener('resize', updateDimensions)
+    return () => {
+      window.removeEventListener('resize', updateDimensions)
+      resizeObserver.disconnect()
+    }
   }, [pixelSize])
 
   const getPixelKey = (row: number, col: number): string => {
@@ -199,7 +215,10 @@ export default function DrawingCanvas({
         userSelect: 'none',
         touchAction: 'none',
         position: 'relative',
-        width: pattern === 'bricks' ? `${dimensions.cols * pixelSize + pixelSize / 2}px` : 'auto',
+        width: pattern === 'bricks' ? `${dimensions.cols * pixelSize + pixelSize / 2}px` : `${dimensions.cols * pixelSize}px`,
+        height: `${dimensions.rows * pixelSize}px`,
+        maxWidth: '100%',
+        maxHeight: '100%',
       }}
       onMouseMove={handleCanvasMouseMove}
       onMouseUp={handleMouseUp}
