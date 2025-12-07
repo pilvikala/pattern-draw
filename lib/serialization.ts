@@ -11,15 +11,27 @@ export function serializeDrawing(data: DrawingData): string {
   // Pattern: 's'=squares, 'b'=bricks, 'v'=bricksVertical
   const patternChar = data.pattern === 'squares' ? 's' : data.pattern === 'bricks' ? 'b' : 'v'
   
-  const colorsArray = Object.entries(data.colors).map(([key, color]) => {
+  const savedColorsArray = Object.entries(data.colors).map(([key, color]) => {
     return `${compressColor(color)}`
   })
+
+  const allColorsArray: Record<string,number> = {};
+  Object.entries(data.grid).forEach(([key, color]) => {
+    if (!color || color === '#ffffff' || color === '#fff') return;
+    if (!Object.keys(allColorsArray).includes(compressColor(color))) {
+      allColorsArray[compressColor(color)] = 1
+    } else {
+      allColorsArray[compressColor(color)]++
+    }
+  })
+
+  const allColorsArraySorted: string[] = Object.keys(allColorsArray).sort((a, b) => allColorsArray[b] - allColorsArray[a])
   
   // Grid: only store non-white pixels in compact format "row,col:color"
   const gridEntries: string[] = []
   Object.entries(data.grid).forEach(([key, color]) => {
     if (color && color !== '#ffffff' && color !== '#fff') {
-      gridEntries.push(`${key}:${compressColor(color)}`)
+      gridEntries.push(`${key}:${allColorsArraySorted.indexOf(compressColor(color))}`)
     }
   })
   
@@ -31,7 +43,8 @@ export function serializeDrawing(data: DrawingData): string {
     data.pixelSize,
     data.canvasWidth,
     data.canvasHeight,
-    colorsArray.join(','),
+    savedColorsArray.join(','),
+    allColorsArraySorted.join(','),
     gridEntries.join(';')
   ].join('|')
   
@@ -55,18 +68,24 @@ export function deserializeDrawing(compact: string): DrawingData | null {
     const canvasWidth = parseInt(parts[2]) || 20
     const canvasHeight = parseInt(parts[3]) || 20
     
-    const colorsArray = parts[4] ? parts[4].split(',').filter(Boolean) : []
-    const colors = colorsArray.map(decompressColor).reduce((acc, color, idx) => {
+    const savedColorsArray = parts[4] ? parts[4].split(',').filter(Boolean) : []
+    const colors = savedColorsArray.map(decompressColor).reduce((acc, color, idx) => {
+      acc[idx.toString()] = color
+      return acc
+    }, {} as { [key: string]: string })
+    
+    const allColorsArray = parts[5] ? parts[5].split(',').filter(Boolean) : []
+    const allColors = allColorsArray.map(decompressColor).reduce((acc, color, idx) => {
       acc[idx.toString()] = color
       return acc
     }, {} as { [key: string]: string })
     
     const grid: { [key: string]: string } = {}
-    if (parts[5]) {
-      parts[5].split(';').forEach((entry) => {
+    if (parts[6]) {
+      parts[6].split(';').forEach((entry) => {
         const [key, color] = entry.split(':')
         if (key && color) {
-          grid[key] = decompressColor(color)
+          grid[key] = allColors[color]
         }
       })
     }
