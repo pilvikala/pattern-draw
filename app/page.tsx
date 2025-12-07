@@ -9,7 +9,7 @@ import Controls from '@/components/Controls'
 import MobileMenu from '@/components/MobileMenu'
 import styles from './page.module.css'
 
-export type MatrixPattern = 'squares' | 'bricks'
+export type MatrixPattern = 'squares' | 'bricks' | 'bricksVertical'
 
 export interface DrawingData {
   pattern: MatrixPattern
@@ -148,10 +148,11 @@ export default function Home() {
     const cols = maxCol > 0 ? maxCol + 1 : 40
     const rows = maxRow > 0 ? maxRow + 1 : 30
 
-    // For brick pattern, add extra width for offset
+    // For brick patterns, add extra dimension for offset
     const widthOffset = pattern === 'bricks' ? pixelSize / 2 : 0
+    const heightOffset = pattern === 'bricksVertical' ? pixelSize / 2 : 0
     canvas.width = cols * pixelSize + widthOffset
-    canvas.height = rows * pixelSize
+    canvas.height = rows * pixelSize + heightOffset
 
     // Fill background
     ctx.fillStyle = '#ffffff'
@@ -165,10 +166,18 @@ export default function Home() {
         if (color) {
           ctx.fillStyle = color
           if (pattern === 'bricks' && row % 2 === 1) {
-            // Offset for brick pattern
+            // Horizontal offset for brick pattern
             ctx.fillRect(
               col * pixelSize + pixelSize / 2,
               row * pixelSize,
+              pixelSize,
+              pixelSize
+            )
+          } else if (pattern === 'bricksVertical' && col % 2 === 1) {
+            // Vertical offset for vertical brick pattern
+            ctx.fillRect(
+              col * pixelSize,
+              row * pixelSize + pixelSize / 2,
               pixelSize,
               pixelSize
             )

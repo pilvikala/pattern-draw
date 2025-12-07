@@ -41,6 +41,7 @@ export default function Controls({
         >
           <option value="squares">Regular Squares</option>
           <option value="bricks">Interleaved (Bricks)</option>
+          <option value="bricksVertical">Interleaved Vertical</option>
         </select>
       </div>
 

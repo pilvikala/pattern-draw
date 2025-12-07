@@ -88,19 +88,35 @@ export default function DrawingCanvas({
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
     
-    const row = Math.floor(y / pixelSize)
-    
-    // For brick pattern, need to account for offset when calculating column
+    let row: number
     let col: number
-    if (pattern === 'bricks' && row % 2 === 1) {
-      // For offset rows, adjust column calculation
-      const adjustedX = x - pixelSize / 2
-      col = Math.floor(adjustedX / pixelSize)
-      // Clamp to valid range
-      if (col < 0) col = 0
-      if (col >= dimensions.cols) col = dimensions.cols - 1
-    } else {
+    
+    if (pattern === 'bricks') {
+      // Horizontal offset: odd rows are offset horizontally
+      row = Math.floor(y / pixelSize)
+      if (row % 2 === 1) {
+        const adjustedX = x - pixelSize / 2
+        col = Math.floor(adjustedX / pixelSize)
+        if (col < 0) col = 0
+        if (col >= dimensions.cols) col = dimensions.cols - 1
+      } else {
+        col = Math.floor(x / pixelSize)
+      }
+    } else if (pattern === 'bricksVertical') {
+      // Vertical offset: odd columns are offset vertically
       col = Math.floor(x / pixelSize)
+      if (col % 2 === 1) {
+        const adjustedY = y - pixelSize / 2
+        row = Math.floor(adjustedY / pixelSize)
+        if (row < 0) row = 0
+        if (row >= dimensions.rows) row = dimensions.rows - 1
+      } else {
+        row = Math.floor(y / pixelSize)
+      }
+    } else {
+      // Regular squares
+      col = Math.floor(x / pixelSize)
+      row = Math.floor(y / pixelSize)
     }
     
     if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
@@ -132,19 +148,35 @@ export default function DrawingCanvas({
       const x = touch.clientX - rect.left
       const y = touch.clientY - rect.top
       
-      const row = Math.floor(y / pixelSize)
-      
-      // For brick pattern, need to account for offset when calculating column
+      let row: number
       let col: number
-      if (pattern === 'bricks' && row % 2 === 1) {
-        // For offset rows, adjust column calculation
-        const adjustedX = x - pixelSize / 2
-        col = Math.floor(adjustedX / pixelSize)
-        // Clamp to valid range
-        if (col < 0) col = 0
-        if (col >= dimensions.cols) col = dimensions.cols - 1
-      } else {
+      
+      if (pattern === 'bricks') {
+        // Horizontal offset: odd rows are offset horizontally
+        row = Math.floor(y / pixelSize)
+        if (row % 2 === 1) {
+          const adjustedX = x - pixelSize / 2
+          col = Math.floor(adjustedX / pixelSize)
+          if (col < 0) col = 0
+          if (col >= dimensions.cols) col = dimensions.cols - 1
+        } else {
+          col = Math.floor(x / pixelSize)
+        }
+      } else if (pattern === 'bricksVertical') {
+        // Vertical offset: odd columns are offset vertically
         col = Math.floor(x / pixelSize)
+        if (col % 2 === 1) {
+          const adjustedY = y - pixelSize / 2
+          row = Math.floor(adjustedY / pixelSize)
+          if (row < 0) row = 0
+          if (row >= dimensions.rows) row = dimensions.rows - 1
+        } else {
+          row = Math.floor(y / pixelSize)
+        }
+      } else {
+        // Regular squares
+        col = Math.floor(x / pixelSize)
+        row = Math.floor(y / pixelSize)
       }
       
       if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
@@ -204,6 +236,31 @@ export default function DrawingCanvas({
     )
   }
 
+  const renderBrickVertical = (row: number, col: number) => {
+    const color = getPixelColor(row, col)
+    const key = getPixelKey(row, col)
+    const isOffset = col % 2 === 1
+    const offset = isOffset ? pixelSize / 2 : 0
+    
+    return (
+      <div
+        key={key}
+        className={styles.pixel}
+        style={{
+          width: `${pixelSize}px`,
+          height: `${pixelSize}px`,
+          backgroundColor: color,
+          border: '1px solid #ddd',
+          transform: isOffset ? `translateY(${offset}px)` : 'none',
+        }}
+        onMouseDown={(e) => handleMouseDown(e, row, col)}
+        onTouchStart={(e) => handleTouchStart(e, row, col)}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      />
+    )
+  }
+
   return (
     <div
       ref={containerRef}
@@ -216,7 +273,7 @@ export default function DrawingCanvas({
         touchAction: 'none',
         position: 'relative',
         width: pattern === 'bricks' ? `${dimensions.cols * pixelSize + pixelSize / 2}px` : `${dimensions.cols * pixelSize}px`,
-        height: `${dimensions.rows * pixelSize}px`,
+        height: pattern === 'bricksVertical' ? `${dimensions.rows * pixelSize + pixelSize / 2}px` : `${dimensions.rows * pixelSize}px`,
         maxWidth: '100%',
         maxHeight: '100%',
       }}
@@ -225,9 +282,15 @@ export default function DrawingCanvas({
       onMouseLeave={handleMouseLeave}
     >
       {Array.from({ length: dimensions.rows }).map((_, row) =>
-        Array.from({ length: dimensions.cols }).map((_, col) =>
-          pattern === 'bricks' ? renderBrick(row, col) : renderSquare(row, col)
-        )
+        Array.from({ length: dimensions.cols }).map((_, col) => {
+          if (pattern === 'bricks') {
+            return renderBrick(row, col)
+          } else if (pattern === 'bricksVertical') {
+            return renderBrickVertical(row, col)
+          } else {
+            return renderSquare(row, col)
+          }
+        })
       )}
     </div>
   )
