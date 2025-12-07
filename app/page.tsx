@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import DrawingCanvas from '@/components/DrawingCanvas'
 import ColorPicker from '@/components/ColorPicker'
 import CompactColorPicker from '@/components/CompactColorPicker'
@@ -78,8 +78,8 @@ export default function Home() {
     }
   }, [])
 
-  // Save to local storage whenever data changes
-  useEffect(() => {
+  // Save function that can be called manually - memoized with useCallback
+  const saveToLocalStorage = useCallback(() => {
     const data: DrawingData = {
       pattern,
       pixelSize,
@@ -91,8 +91,48 @@ export default function Home() {
       }, {} as { [key: string]: string }),
       grid,
     }
-    localStorage.setItem('pattern-draw-data', JSON.stringify(data))
+    try {
+      localStorage.setItem('pattern-draw-data', JSON.stringify(data))
+    } catch (e) {
+      console.error('Failed to save to localStorage', e)
+    }
   }, [pattern, pixelSize, canvasWidth, canvasHeight, savedColors, grid])
+
+  // Save to local storage whenever data changes
+  useEffect(() => {
+    saveToLocalStorage()
+  }, [saveToLocalStorage])
+
+  // Save immediately when page is about to be hidden/unloaded (mobile app switching)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        saveToLocalStorage()
+      }
+    }
+
+    const handlePageHide = () => {
+      saveToLocalStorage()
+    }
+
+    const handleBeforeUnload = () => {
+      saveToLocalStorage()
+    }
+
+    // Add event listeners
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('pagehide', handlePageHide)
+    window.addEventListener('beforeunload', handleBeforeUnload)
+
+    // Cleanup
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('pagehide', handlePageHide)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [saveToLocalStorage])
 
   const handleColorSelect = (color: string) => {
     setSelectedColor(color)
