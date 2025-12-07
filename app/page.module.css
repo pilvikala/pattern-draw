@@ -26,6 +26,48 @@
   z-index: 100;
 }
 
+.titleContainer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.undoRedoButtons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.undoRedoButton {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #333;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.undoRedoButton:hover:not(:disabled) {
+  background: #e0e0e0;
+  border-color: #bbb;
+}
+
+.undoRedoButton:active:not(:disabled) {
+  background: #d0d0d0;
+}
+
+.undoRedoButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .title {
   font-size: 1.25rem;
   margin: 0;
@@ -83,12 +125,25 @@
     padding: 1rem 0;
     border-bottom: none;
     background: transparent;
+    justify-content: center;
+    position: relative;
+  }
+
+  .titleContainer {
+    justify-content: center;
+    gap: 1.5rem;
+  }
+
+  .undoRedoButton {
+    width: 44px;
+    height: 44px;
   }
 
   .title {
     font-size: 2.5rem;
     text-align: center;
     margin-bottom: 2rem;
+    margin: 0;
   }
 
   .topBar {
