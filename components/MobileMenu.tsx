@@ -13,6 +13,7 @@ interface MobileMenuProps {
   onShare: () => void
   onDownload: () => void
   onPrint: () => void
+  // onPrint is kept for compatibility but not used
 }
 
 export default function MobileMenu({
@@ -103,9 +104,6 @@ export default function MobileMenu({
                 </button>
                 <button onClick={onDownload} className={styles.menuButton}>
                   Download
-                </button>
-                <button onClick={onPrint} className={styles.menuButton}>
-                  Print
                 </button>
               </div>
             </div>

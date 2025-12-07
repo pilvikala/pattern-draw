@@ -12,6 +12,7 @@ interface ControlsProps {
   onShare: () => void
   onDownload: () => void
   onPrint: () => void
+  // onPrint is kept for compatibility but not used
 }
 
 export default function Controls({
@@ -68,9 +69,6 @@ export default function Controls({
         </button>
         <button onClick={onDownload} className={styles.button}>
           Download
-        </button>
-        <button onClick={onPrint} className={styles.button}>
-          Print
         </button>
       </div>
     </div>

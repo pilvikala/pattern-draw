@@ -158,33 +158,31 @@ export default function Home() {
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-    // Draw grid
+    // Draw grid with borders
+    ctx.strokeStyle = '#ddd'
+    ctx.lineWidth = 1
+    
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
         const key = `${row},${col}`
-        const color = grid[key]
-        if (color) {
-          ctx.fillStyle = color
-          if (pattern === 'bricks' && row % 2 === 1) {
-            // Horizontal offset for brick pattern
-            ctx.fillRect(
-              col * pixelSize + pixelSize / 2,
-              row * pixelSize,
-              pixelSize,
-              pixelSize
-            )
-          } else if (pattern === 'bricksVertical' && col % 2 === 1) {
-            // Vertical offset for vertical brick pattern
-            ctx.fillRect(
-              col * pixelSize,
-              row * pixelSize + pixelSize / 2,
-              pixelSize,
-              pixelSize
-            )
-          } else {
-            ctx.fillRect(col * pixelSize, row * pixelSize, pixelSize, pixelSize)
-          }
+        const color = grid[key] || '#ffffff'
+        
+        let x = col * pixelSize
+        let y = row * pixelSize
+        
+        // Adjust position for brick patterns
+        if (pattern === 'bricks' && row % 2 === 1) {
+          x += pixelSize / 2
+        } else if (pattern === 'bricksVertical' && col % 2 === 1) {
+          y += pixelSize / 2
         }
+        
+        // Fill pixel
+        ctx.fillStyle = color
+        ctx.fillRect(x, y, pixelSize, pixelSize)
+        
+        // Draw border
+        ctx.strokeRect(x, y, pixelSize, pixelSize)
       }
     }
 
@@ -201,9 +199,6 @@ export default function Home() {
     })
   }
 
-  const handlePrint = () => {
-    window.print()
-  }
 
   return (
     <main className={styles.main}>
@@ -218,7 +213,7 @@ export default function Home() {
             onClear={handleClear}
             onShare={handleShare}
             onDownload={handleDownload}
-            onPrint={handlePrint}
+            onPrint={() => {}}
           />
         </div>
 
@@ -264,7 +259,7 @@ export default function Home() {
             onClear={handleClear}
             onShare={handleShare}
             onDownload={handleDownload}
-            onPrint={handlePrint}
+            onPrint={() => {}}
           />
         </div>
 
@@ -276,6 +271,15 @@ export default function Home() {
             onColorSave={handleColorSave}
             isColorPickerMode={isColorPickerMode}
             onColorPickerModeToggle={setIsColorPickerMode}
+          />
+          <ColorPalette
+            colors={savedColors}
+            selectedColor={selectedColor}
+            onColorSelect={handleColorSelect}
+            onColorPick={handleColorPick}
+            onColorRemove={(color) => {
+              setSavedColors(savedColors.filter((c) => c !== color))
+            }}
           />
         </div>
       </div>
