@@ -24,11 +24,11 @@ export default function Home() {
   const [selectedColor, setSelectedColor] = useState('#000000')
   const [savedColors, setSavedColors] = useState<string[]>([])
   const [pattern, setPattern] = useState<MatrixPattern>('squares')
-  const [pixelSize, setPixelSize] = useState(20)
-  const [canvasWidth, setCanvasWidth] = useState(40)
-  const [canvasHeight, setCanvasHeight] = useState(30)
-  const [tempCanvasWidth, setTempCanvasWidth] = useState('40')
-  const [tempCanvasHeight, setTempCanvasHeight] = useState('30')
+  const [pixelSize, setPixelSize] = useState(15)
+  const [canvasWidth, setCanvasWidth] = useState(20)
+  const [canvasHeight, setCanvasHeight] = useState(20)
+  const [tempCanvasWidth, setTempCanvasWidth] = useState('20')
+  const [tempCanvasHeight, setTempCanvasHeight] = useState('20')
   const [grid, setGrid] = useState<{ [key: string]: string }>({})
   const [isColorPickerMode, setIsColorPickerMode] = useState(false)
 
@@ -39,9 +39,9 @@ export default function Home() {
       try {
         const data: DrawingData = JSON.parse(saved)
         setPattern(data.pattern || 'squares')
-        setPixelSize(data.pixelSize || 20)
-        const width = data.canvasWidth || 40
-        const height = data.canvasHeight || 30
+        setPixelSize(data.pixelSize || 15)
+        const width = data.canvasWidth || 20
+        const height = data.canvasHeight || 20
         setCanvasWidth(width)
         setCanvasHeight(height)
         setTempCanvasWidth(width.toString())
@@ -64,9 +64,9 @@ export default function Home() {
           const decoded = decodeURIComponent(atob(encoded))
           const data: DrawingData = JSON.parse(decoded)
           setPattern(data.pattern || 'squares')
-          setPixelSize(data.pixelSize || 20)
-          const width = data.canvasWidth || 40
-          const height = data.canvasHeight || 30
+          setPixelSize(data.pixelSize || 15)
+          const width = data.canvasWidth || 20
+          const height = data.canvasHeight || 20
           setCanvasWidth(width)
           setCanvasHeight(height)
           setTempCanvasWidth(width.toString())
@@ -147,6 +147,8 @@ export default function Home() {
     const data: DrawingData = {
       pattern,
       pixelSize,
+      canvasWidth,
+      canvasHeight,
       colors: savedColors.reduce((acc, color, idx) => {
         acc[idx.toString()] = color
         return acc
@@ -234,12 +236,10 @@ export default function Home() {
           <MobileMenu
             pattern={pattern}
             pixelSize={pixelSize}
-            canvasWidth={canvasWidth}
-            canvasHeight={canvasHeight}
-            onPatternChange={setPattern}
-            onPixelSizeChange={setPixelSize}
             tempCanvasWidth={tempCanvasWidth}
             tempCanvasHeight={tempCanvasHeight}
+            onPatternChange={setPattern}
+            onPixelSizeChange={setPixelSize}
             onTempCanvasWidthChange={setTempCanvasWidth}
             onTempCanvasHeightChange={setTempCanvasHeight}
             onSetCanvasSize={handleSetCanvasSize}
@@ -289,12 +289,10 @@ export default function Home() {
           <Controls
             pattern={pattern}
             pixelSize={pixelSize}
-            canvasWidth={canvasWidth}
-            canvasHeight={canvasHeight}
-            onPatternChange={setPattern}
-            onPixelSizeChange={setPixelSize}
             tempCanvasWidth={tempCanvasWidth}
             tempCanvasHeight={tempCanvasHeight}
+            onPatternChange={setPattern}
+            onPixelSizeChange={setPixelSize}
             onTempCanvasWidthChange={setTempCanvasWidth}
             onTempCanvasHeightChange={setTempCanvasHeight}
             onSetCanvasSize={handleSetCanvasSize}
