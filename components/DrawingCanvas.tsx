@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import type { MatrixPattern } from '@/lib/types'
 import styles from './DrawingCanvas.module.css'
 
@@ -39,10 +39,10 @@ export default function DrawingCanvas({
     return grid[key] || '#ffffff'
   }
 
-  const handlePixelClick = (row: number, col: number) => {
+  const handlePixelClick = useCallback((row: number, col: number) => {
     const key = getPixelKey(row, col)
     onPixelFill(key, selectedColor)
-  }
+  }, [onPixelFill, selectedColor])
 
   const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
     e.preventDefault()
@@ -105,14 +105,61 @@ export default function DrawingCanvas({
     setIsDrawing(false)
   }
 
-  const handleTouchStart = (e: React.TouchEvent, row: number, col: number) => {
+  const handleTouchStart = useCallback((e: TouchEvent) => {
     e.preventDefault()
-    setIsDrawing(true)
-    handlePixelClick(row, col)
-  }
+    
+    const touch = e.touches[0]
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      const x = touch.clientX - rect.left
+      const y = touch.clientY - rect.top
+      
+      let row: number
+      let col: number
+      
+      if (pattern === 'bricks') {
+        // Horizontal offset: odd rows are offset horizontally
+        row = Math.floor(y / pixelSize)
+        if (row % 2 === 1) {
+          const adjustedX = x - pixelSize / 2
+          col = Math.floor(adjustedX / pixelSize)
+          if (col < 0) col = 0
+          if (col >= dimensions.cols) col = dimensions.cols - 1
+        } else {
+          col = Math.floor(x / pixelSize)
+        }
+      } else if (pattern === 'bricksVertical') {
+        // Vertical offset: odd columns are offset vertically
+        col = Math.floor(x / pixelSize)
+        if (col % 2 === 1) {
+          const adjustedY = y - pixelSize / 2
+          row = Math.floor(adjustedY / pixelSize)
+          if (row < 0) row = 0
+          if (row >= dimensions.rows) row = dimensions.rows - 1
+        } else {
+          row = Math.floor(y / pixelSize)
+        }
+      } else {
+        // Regular squares
+        col = Math.floor(x / pixelSize)
+        row = Math.floor(y / pixelSize)
+      }
+      
+      if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
+        if (isColorPickerMode) {
+          // Color picker mode - just pick the color
+          handlePixelClick(row, col)
+        } else {
+          // Drawing mode - start drawing
+          setIsDrawing(true)
+          handlePixelClick(row, col)
+        }
+      }
+    }
+  }, [isColorPickerMode, pattern, pixelSize, dimensions, handlePixelClick])
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDrawing) return
+  const handleTouchMove = useCallback((e: TouchEvent) => {
+    if (!isDrawing || isColorPickerMode) return
     e.preventDefault()
     
     const touch = e.touches[0]
@@ -156,11 +203,29 @@ export default function DrawingCanvas({
         handlePixelClick(row, col)
       }
     }
-  }
+  }, [isDrawing, isColorPickerMode, pattern, pixelSize, dimensions, handlePixelClick])
 
-  const handleTouchEnd = () => {
+  const handleTouchEnd = useCallback(() => {
     setIsDrawing(false)
-  }
+  }, [])
+
+  // Add non-passive touch event listeners to container
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: false })
+    container.addEventListener('touchmove', handleTouchMove, { passive: false })
+    container.addEventListener('touchend', handleTouchEnd, { passive: false })
+    container.addEventListener('touchcancel', handleTouchEnd, { passive: false })
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart)
+      container.removeEventListener('touchmove', handleTouchMove)
+      container.removeEventListener('touchend', handleTouchEnd)
+      container.removeEventListener('touchcancel', handleTouchEnd)
+    }
+  }, [handleTouchStart, handleTouchMove, handleTouchEnd])
 
   const renderSquare = (row: number, col: number) => {
     const color = getPixelColor(row, col)
@@ -177,9 +242,6 @@ export default function DrawingCanvas({
           border: '1px solid #ddd',
         }}
         onMouseDown={(e) => handleMouseDown(e, row, col)}
-        onTouchStart={(e) => handleTouchStart(e, row, col)}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
       />
     )
   }
@@ -202,9 +264,6 @@ export default function DrawingCanvas({
           transform: isOffset ? `translateX(${offset}px)` : 'none',
         }}
         onMouseDown={(e) => handleMouseDown(e, row, col)}
-        onTouchStart={(e) => handleTouchStart(e, row, col)}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
       />
     )
   }
@@ -227,9 +286,6 @@ export default function DrawingCanvas({
           transform: isOffset ? `translateY(${offset}px)` : 'none',
         }}
         onMouseDown={(e) => handleMouseDown(e, row, col)}
-        onTouchStart={(e) => handleTouchStart(e, row, col)}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
       />
     )
   }
