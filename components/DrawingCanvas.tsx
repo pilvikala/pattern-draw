@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { MatrixPattern } from '@/app/page'
+import type { MatrixPattern } from '@/lib/types'
 import styles from './DrawingCanvas.module.css'
 
 interface DrawingCanvasProps {

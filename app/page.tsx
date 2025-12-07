@@ -8,18 +8,11 @@ import ColorPalette from '@/components/ColorPalette'
 import Controls from '@/components/Controls'
 import MobileMenu from '@/components/MobileMenu'
 import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
+import type { DrawingData, MatrixPattern } from '@/lib/types'
 import styles from './page.module.css'
 
-export type MatrixPattern = 'squares' | 'bricks' | 'bricksVertical'
-
-export interface DrawingData {
-  pattern: MatrixPattern
-  pixelSize: number
-  canvasWidth: number
-  canvasHeight: number
-  colors: { [key: string]: string }
-  grid: { [key: string]: string }
-}
+// Re-export types for backward compatibility
+export type { MatrixPattern, DrawingData } from '@/lib/types'
 
 export default function Home() {
   const [selectedColor, setSelectedColor] = useState('#000000')

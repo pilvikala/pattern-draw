@@ -1,4 +1,4 @@
-import { DrawingData, MatrixPattern } from '@/app/page'
+import type { DrawingData, MatrixPattern } from '@/lib/types'
 
 /**
  * Serializes drawing data into a compact string format

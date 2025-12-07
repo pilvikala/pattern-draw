@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { MatrixPattern } from '@/app/page'
+import type { MatrixPattern } from '@/lib/types'
 import styles from './MobileMenu.module.css'
 
 interface MobileMenuProps {
