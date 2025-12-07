@@ -7,6 +7,7 @@ import CompactColorPicker from '@/components/CompactColorPicker'
 import ColorPalette from '@/components/ColorPalette'
 import Controls from '@/components/Controls'
 import MobileMenu from '@/components/MobileMenu'
+import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
 import styles from './page.module.css'
 
 export type MatrixPattern = 'squares' | 'bricks' | 'bricksVertical'
@@ -62,57 +63,8 @@ export default function Home() {
       if (encoded) {
         const loadFromUrl = async () => {
           try {
-            // Restore base64url to base64
-            const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/')
-            const padding = '='.repeat((4 - base64.length % 4) % 4)
-            const base64Padded = base64 + padding
-            
-            let decoded: string = ''
-            
-            try {
-              // Try decompression
-              if (typeof DecompressionStream !== 'undefined') {
-                const binaryString = atob(base64Padded)
-                const bytes = new Uint8Array(binaryString.length)
-                for (let i = 0; i < binaryString.length; i++) {
-                  bytes[i] = binaryString.charCodeAt(i)
-                }
-                
-                const stream = new DecompressionStream('gzip')
-                const writer = stream.writable.getWriter()
-                writer.write(bytes)
-                writer.close()
-                
-                const decompressed = await new Response(stream.readable).arrayBuffer()
-                decoded = new TextDecoder().decode(decompressed)
-              } else {
-                decoded = atob(base64Padded)
-              }
-            } catch (e) {
-              // Not compressed, decode as base64
-              decoded = atob(base64Padded)
-            }
-            
-            // Try compact format first
-            const compactData = deserializeDrawing(decoded)
-            if (compactData) {
-              setPattern(compactData.pattern || 'squares')
-              setPixelSize(compactData.pixelSize || 15)
-              const width = compactData.canvasWidth || 20
-              const height = compactData.canvasHeight || 20
-              setCanvasWidth(width)
-              setCanvasHeight(height)
-              setTempCanvasWidth(width.toString())
-              setTempCanvasHeight(height.toString())
-              setSavedColors(Object.values(compactData.colors || {}))
-              setGrid(compactData.grid || {})
-              return
-            }
-            
-            // Fallback to old JSON format
-            try {
-              const jsonStr = decodeURIComponent(decoded)
-              const data: DrawingData = JSON.parse(jsonStr)
+            const data = await decodeDrawing(encoded)
+            if (data) {
               setPattern(data.pattern || 'squares')
               setPixelSize(data.pixelSize || 15)
               const width = data.canvasWidth || 20
@@ -123,8 +75,6 @@ export default function Home() {
               setTempCanvasHeight(height.toString())
               setSavedColors(Object.values(data.colors || {}))
               setGrid(data.grid || {})
-            } catch (e2) {
-              console.error('Failed to parse as JSON', e2)
             }
           } catch (e) {
             console.error('Failed to load from URL', e)
@@ -198,81 +148,6 @@ export default function Home() {
     }
   }
 
-  // Compact serialization functions
-  const serializeDrawing = (data: DrawingData): string => {
-    // Pattern: 's'=squares, 'b'=bricks, 'v'=bricksVertical
-    const patternChar = data.pattern === 'squares' ? 's' : data.pattern === 'bricks' ? 'b' : 'v'
-    
-    // Colors as array (more compact than object)
-    const colorsArray = Object.values(data.colors)
-    
-    // Grid: only store non-white pixels in compact format "row,col:color"
-    const gridEntries: string[] = []
-    Object.entries(data.grid).forEach(([key, color]) => {
-      if (color && color !== '#ffffff' && color !== '#fff') {
-        gridEntries.push(`${key}:${color}`)
-      }
-    })
-    
-    // Compact format: pattern|pixelSize|width|height|colors|grid
-    // Colors: comma-separated hex values
-    // Grid: semicolon-separated entries
-    const compact = [
-      patternChar,
-      data.pixelSize,
-      data.canvasWidth,
-      data.canvasHeight,
-      colorsArray.join(','),
-      gridEntries.join(';')
-    ].join('|')
-    
-    return compact
-  }
-
-  const deserializeDrawing = (compact: string): DrawingData | null => {
-    try {
-      const parts = compact.split('|')
-      if (parts.length < 6) return null
-      
-      const patternChar = parts[0]
-      const pattern: MatrixPattern = 
-        patternChar === 's' ? 'squares' : 
-        patternChar === 'b' ? 'bricks' : 'bricksVertical'
-      
-      const pixelSize = parseInt(parts[1]) || 15
-      const canvasWidth = parseInt(parts[2]) || 20
-      const canvasHeight = parseInt(parts[3]) || 20
-      
-      const colorsArray = parts[4] ? parts[4].split(',').filter(Boolean) : []
-      const colors = colorsArray.reduce((acc, color, idx) => {
-        acc[idx.toString()] = color
-        return acc
-      }, {} as { [key: string]: string })
-      
-      const grid: { [key: string]: string } = {}
-      if (parts[5]) {
-        parts[5].split(';').forEach((entry) => {
-          const [key, color] = entry.split(':')
-          if (key && color) {
-            grid[key] = color
-          }
-        })
-      }
-      
-      return {
-        pattern,
-        pixelSize,
-        canvasWidth,
-        canvasHeight,
-        colors,
-        grid,
-      }
-    } catch (e) {
-      console.error('Failed to deserialize', e)
-      return null
-    }
-  }
-
   const handleShare = async () => {
     const data: DrawingData = {
       pattern,
@@ -286,40 +161,7 @@ export default function Home() {
       grid,
     }
     
-    // Use compact serialization
-    const compact = serializeDrawing(data)
-    
-    // Try compression if available (modern browsers)
-    let encoded: string
-    if (typeof CompressionStream !== 'undefined') {
-      try {
-        const stream = new CompressionStream('gzip')
-        const writer = stream.writable.getWriter()
-        const encoder = new TextEncoder()
-        writer.write(encoder.encode(compact))
-        writer.close()
-        
-        const compressed = await new Response(stream.readable).arrayBuffer()
-        // Convert to base64url (URL-safe)
-        encoded = btoa(String.fromCharCode(...new Uint8Array(compressed)))
-          .replace(/\+/g, '-')
-          .replace(/\//g, '_')
-          .replace(/=+$/, '')
-      } catch (e) {
-        // Fallback to uncompressed
-        encoded = btoa(compact)
-          .replace(/\+/g, '-')
-          .replace(/\//g, '_')
-          .replace(/=+$/, '')
-      }
-    } else {
-      // Fallback: just base64 encode
-      encoded = btoa(compact)
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '')
-    }
-    
+    const encoded = await encodeDrawing(data)
     const url = `${window.location.origin}${window.location.pathname}?drawing=${encoded}`
     
     if (navigator.clipboard) {
