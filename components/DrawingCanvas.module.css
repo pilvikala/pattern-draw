@@ -1,0 +1,24 @@
+.canvas {
+  display: grid;
+  background: #f9f9f9;
+  border: 2px solid #ddd;
+  border-radius: 4px;
+}
+
+.pixel {
+  cursor: crosshair;
+  transition: opacity 0.1s;
+}
+
+.canvas.colorPickerMode .pixel {
+  cursor: grab;
+}
+
+.pixel:hover {
+  opacity: 0.8;
+}
+
+.pixel:active {
+  opacity: 0.6;
+}
+
