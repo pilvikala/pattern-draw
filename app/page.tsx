@@ -14,6 +14,8 @@ export type MatrixPattern = 'squares' | 'bricks' | 'bricksVertical'
 export interface DrawingData {
   pattern: MatrixPattern
   pixelSize: number
+  canvasWidth: number
+  canvasHeight: number
   colors: { [key: string]: string }
   grid: { [key: string]: string }
 }
@@ -23,6 +25,10 @@ export default function Home() {
   const [savedColors, setSavedColors] = useState<string[]>([])
   const [pattern, setPattern] = useState<MatrixPattern>('squares')
   const [pixelSize, setPixelSize] = useState(20)
+  const [canvasWidth, setCanvasWidth] = useState(40)
+  const [canvasHeight, setCanvasHeight] = useState(30)
+  const [tempCanvasWidth, setTempCanvasWidth] = useState('40')
+  const [tempCanvasHeight, setTempCanvasHeight] = useState('30')
   const [grid, setGrid] = useState<{ [key: string]: string }>({})
   const [isColorPickerMode, setIsColorPickerMode] = useState(false)
 
@@ -34,6 +40,12 @@ export default function Home() {
         const data: DrawingData = JSON.parse(saved)
         setPattern(data.pattern || 'squares')
         setPixelSize(data.pixelSize || 20)
+        const width = data.canvasWidth || 40
+        const height = data.canvasHeight || 30
+        setCanvasWidth(width)
+        setCanvasHeight(height)
+        setTempCanvasWidth(width.toString())
+        setTempCanvasHeight(height.toString())
         setSavedColors(Object.values(data.colors || {}))
         setGrid(data.grid || {})
       } catch (e) {
@@ -53,6 +65,12 @@ export default function Home() {
           const data: DrawingData = JSON.parse(decoded)
           setPattern(data.pattern || 'squares')
           setPixelSize(data.pixelSize || 20)
+          const width = data.canvasWidth || 40
+          const height = data.canvasHeight || 30
+          setCanvasWidth(width)
+          setCanvasHeight(height)
+          setTempCanvasWidth(width.toString())
+          setTempCanvasHeight(height.toString())
           setSavedColors(Object.values(data.colors || {}))
           setGrid(data.grid || {})
         } catch (e) {
@@ -67,6 +85,8 @@ export default function Home() {
     const data: DrawingData = {
       pattern,
       pixelSize,
+      canvasWidth,
+      canvasHeight,
       colors: savedColors.reduce((acc, color, idx) => {
         acc[idx.toString()] = color
         return acc
@@ -74,7 +94,7 @@ export default function Home() {
       grid,
     }
     localStorage.setItem('pattern-draw-data', JSON.stringify(data))
-  }, [pattern, pixelSize, savedColors, grid])
+  }, [pattern, pixelSize, canvasWidth, canvasHeight, savedColors, grid])
 
   const handleColorSelect = (color: string) => {
     setSelectedColor(color)
@@ -108,6 +128,21 @@ export default function Home() {
     setGrid({})
   }
 
+  const handleSetCanvasSize = () => {
+    const width = parseInt(tempCanvasWidth)
+    const height = parseInt(tempCanvasHeight)
+    if (!isNaN(width) && width >= 10 && width <= 200) {
+      setCanvasWidth(width)
+    } else {
+      setTempCanvasWidth(canvasWidth.toString())
+    }
+    if (!isNaN(height) && height >= 10 && height <= 200) {
+      setCanvasHeight(height)
+    } else {
+      setTempCanvasHeight(canvasHeight.toString())
+    }
+  }
+
   const handleShare = () => {
     const data: DrawingData = {
       pattern,
@@ -135,18 +170,9 @@ export default function Home() {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // Calculate dimensions from grid data
-    let maxRow = 0
-    let maxCol = 0
-    Object.keys(grid).forEach((key) => {
-      const [row, col] = key.split(',').map(Number)
-      maxRow = Math.max(maxRow, row)
-      maxCol = Math.max(maxCol, col)
-    })
-
-    // Use default dimensions if grid is empty
-    const cols = maxCol > 0 ? maxCol + 1 : 40
-    const rows = maxRow > 0 ? maxRow + 1 : 30
+    // Use the fixed canvas dimensions
+    const cols = canvasWidth
+    const rows = canvasHeight
 
     // For brick patterns, add extra dimension for offset
     const widthOffset = pattern === 'bricks' ? pixelSize / 2 : 0
@@ -208,8 +234,15 @@ export default function Home() {
           <MobileMenu
             pattern={pattern}
             pixelSize={pixelSize}
+            canvasWidth={canvasWidth}
+            canvasHeight={canvasHeight}
             onPatternChange={setPattern}
             onPixelSizeChange={setPixelSize}
+            tempCanvasWidth={tempCanvasWidth}
+            tempCanvasHeight={tempCanvasHeight}
+            onTempCanvasWidthChange={setTempCanvasWidth}
+            onTempCanvasHeightChange={setTempCanvasHeight}
+            onSetCanvasSize={handleSetCanvasSize}
             onClear={handleClear}
             onShare={handleShare}
             onDownload={handleDownload}
@@ -242,6 +275,8 @@ export default function Home() {
           <DrawingCanvas
             pattern={pattern}
             pixelSize={pixelSize}
+            canvasWidth={canvasWidth}
+            canvasHeight={canvasHeight}
             selectedColor={selectedColor}
             grid={grid}
             onPixelFill={handlePixelFill}
@@ -254,8 +289,15 @@ export default function Home() {
           <Controls
             pattern={pattern}
             pixelSize={pixelSize}
+            canvasWidth={canvasWidth}
+            canvasHeight={canvasHeight}
             onPatternChange={setPattern}
             onPixelSizeChange={setPixelSize}
+            tempCanvasWidth={tempCanvasWidth}
+            tempCanvasHeight={tempCanvasHeight}
+            onTempCanvasWidthChange={setTempCanvasWidth}
+            onTempCanvasHeightChange={setTempCanvasHeight}
+            onSetCanvasSize={handleSetCanvasSize}
             onClear={handleClear}
             onShare={handleShare}
             onDownload={handleDownload}

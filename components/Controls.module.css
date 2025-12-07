@@ -63,6 +63,41 @@
   border: none;
 }
 
+.textInput {
+  width: 100%;
+  padding: 0.5rem;
+  border: 2px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+  background: white;
+}
+
+.textInput:focus {
+  outline: none;
+  border-color: #0070f3;
+}
+
+.setSizeButton {
+  padding: 0.75rem 1.5rem;
+  background: #28a745;
+  color: white;
+  border-radius: 4px;
+  font-weight: 600;
+  transition: background 0.2s;
+  font-size: 0.9rem;
+  cursor: pointer;
+  border: none;
+  width: 100%;
+}
+
+.setSizeButton:hover {
+  background: #218838;
+}
+
+.setSizeButton:active {
+  background: #1e7e34;
+}
+
 .buttonGroup {
   display: flex;
   gap: 0.5rem;

@@ -171,6 +171,41 @@
   border: none;
 }
 
+.textInput {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+  background: white;
+}
+
+.textInput:focus {
+  outline: none;
+  border-color: #0070f3;
+}
+
+.setSizeButton {
+  width: 100%;
+  padding: 1rem;
+  background: #28a745;
+  color: white;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 1rem;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.setSizeButton:hover {
+  background: #218838;
+}
+
+.setSizeButton:active {
+  background: #1e7e34;
+}
+
 .menuActions {
   display: flex;
   flex-direction: column;

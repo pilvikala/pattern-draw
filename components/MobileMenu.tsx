@@ -7,8 +7,13 @@ import styles from './MobileMenu.module.css'
 interface MobileMenuProps {
   pattern: MatrixPattern
   pixelSize: number
+  tempCanvasWidth: string
+  tempCanvasHeight: string
   onPatternChange: (pattern: MatrixPattern) => void
   onPixelSizeChange: (size: number) => void
+  onTempCanvasWidthChange: (width: string) => void
+  onTempCanvasHeightChange: (height: string) => void
+  onSetCanvasSize: () => void
   onClear: () => void
   onShare: () => void
   onDownload: () => void
@@ -19,8 +24,13 @@ interface MobileMenuProps {
 export default function MobileMenu({
   pattern,
   pixelSize,
+  tempCanvasWidth,
+  tempCanvasHeight,
   onPatternChange,
   onPixelSizeChange,
+  onTempCanvasWidthChange,
+  onTempCanvasHeightChange,
+  onSetCanvasSize,
   onClear,
   onShare,
   onDownload,
@@ -93,6 +103,38 @@ export default function MobileMenu({
                   onChange={(e) => onPixelSizeChange(parseInt(e.target.value))}
                   className={styles.slider}
                 />
+              </div>
+
+              <div className={styles.menuItem}>
+                <label className={styles.label}>
+                  Canvas Width (pixels)
+                </label>
+                <input
+                  type="text"
+                  value={tempCanvasWidth}
+                  onChange={(e) => onTempCanvasWidthChange(e.target.value)}
+                  className={styles.textInput}
+                  placeholder="10-200"
+                />
+              </div>
+
+              <div className={styles.menuItem}>
+                <label className={styles.label}>
+                  Canvas Height (pixels)
+                </label>
+                <input
+                  type="text"
+                  value={tempCanvasHeight}
+                  onChange={(e) => onTempCanvasHeightChange(e.target.value)}
+                  className={styles.textInput}
+                  placeholder="10-200"
+                />
+              </div>
+
+              <div className={styles.menuItem}>
+                <button onClick={onSetCanvasSize} className={styles.setSizeButton}>
+                  Set Canvas Size
+                </button>
               </div>
 
               <div className={styles.menuActions}>

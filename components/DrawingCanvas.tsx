@@ -7,6 +7,8 @@ import styles from './DrawingCanvas.module.css'
 interface DrawingCanvasProps {
   pattern: MatrixPattern
   pixelSize: number
+  canvasWidth: number
+  canvasHeight: number
   selectedColor: string
   grid: { [key: string]: string }
   onPixelFill: (key: string, color: string) => void
@@ -16,6 +18,8 @@ interface DrawingCanvasProps {
 export default function DrawingCanvas({
   pattern,
   pixelSize,
+  canvasWidth,
+  canvasHeight,
   selectedColor,
   grid,
   onPixelFill,
@@ -23,39 +27,8 @@ export default function DrawingCanvas({
 }: DrawingCanvasProps) {
   const [isDrawing, setIsDrawing] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const [dimensions, setDimensions] = useState({ cols: 40, rows: 30 })
-
-  useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect()
-        const containerWidth = rect.width
-        const containerHeight = rect.height
-        
-        // For mobile, use full container height; for desktop, limit to reasonable size
-        const isMobile = window.innerWidth < 768
-        const maxHeight = isMobile ? containerHeight : Math.min(containerHeight, 600)
-        
-        const cols = Math.floor(containerWidth / pixelSize)
-        const rows = Math.floor(maxHeight / pixelSize)
-        setDimensions({ cols, rows })
-      }
-    }
-
-    updateDimensions()
-    
-    // Use ResizeObserver for better performance
-    const resizeObserver = new ResizeObserver(updateDimensions)
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current)
-    }
-    
-    window.addEventListener('resize', updateDimensions)
-    return () => {
-      window.removeEventListener('resize', updateDimensions)
-      resizeObserver.disconnect()
-    }
-  }, [pixelSize])
+  
+  const dimensions = { cols: canvasWidth, rows: canvasHeight }
 
   const getPixelKey = (row: number, col: number): string => {
     return `${row},${col}`
@@ -276,6 +249,7 @@ export default function DrawingCanvas({
         height: pattern === 'bricksVertical' ? `${dimensions.rows * pixelSize + pixelSize / 2}px` : `${dimensions.rows * pixelSize}px`,
         maxWidth: '100%',
         maxHeight: '100%',
+        margin: 'auto',
       }}
       onMouseMove={handleCanvasMouseMove}
       onMouseUp={handleMouseUp}
