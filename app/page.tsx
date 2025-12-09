@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import DrawingCanvas from '@/components/DrawingCanvas'
@@ -17,7 +17,7 @@ import styles from './page.module.css'
 // Re-export types for backward compatibility
 export type { MatrixPattern, DrawingData } from '@/lib/types'
 
-export default function Home() {
+function HomeContent() {
   const { data: session } = useSession()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -744,6 +744,20 @@ export default function Home() {
         </div>
       </div>
     </main>
+  )
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <main className={styles.main}>
+        <div className={styles.container}>
+          <div style={{ textAlign: 'center', padding: '2rem' }}>Loading...</div>
+        </div>
+      </main>
+    }>
+      <HomeContent />
+    </Suspense>
   )
 }
 
