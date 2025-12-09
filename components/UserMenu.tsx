@@ -5,7 +5,11 @@ import Link from 'next/link'
 import { useState, useRef, useEffect } from 'react'
 import styles from './UserMenu.module.css'
 
-export default function UserMenu() {
+interface UserMenuProps {
+  className?: string
+}
+
+export default function UserMenu({ className }: UserMenuProps = {}) {
   const { data: session, status } = useSession()
   const [isOpen, setIsOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -26,9 +30,14 @@ export default function UserMenu() {
     }
   }, [isOpen])
 
+  // If className is provided (from mobile menu), add mobileMenuUserMenu class
+  const containerClassName = className
+    ? `${styles.container} ${styles.mobileMenuUserMenu}`
+    : styles.container
+
   if (status === 'loading') {
     return (
-      <div className={styles.container}>
+      <div className={containerClassName}>
         <div className={styles.loading}>Loading...</div>
       </div>
     )
@@ -36,7 +45,7 @@ export default function UserMenu() {
 
   if (!session) {
     return (
-      <div className={styles.container}>
+      <div className={containerClassName}>
         <Link href="/auth/signin" className={styles.signInButton}>
           Sign In
         </Link>
@@ -48,7 +57,7 @@ export default function UserMenu() {
   }
 
   return (
-    <div className={styles.container} ref={menuRef}>
+    <div className={containerClassName} ref={menuRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={styles.userButton}
