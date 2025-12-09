@@ -18,6 +18,8 @@ interface MobileMenuProps {
   onClear: () => void
   onShare: () => void
   onDownload: () => void
+  onSave?: () => void
+  isSaving?: boolean
   onPrint: () => void
   // onPrint is kept for compatibility but not used
 }
@@ -35,6 +37,8 @@ export default function MobileMenu({
   onClear,
   onShare,
   onDownload,
+  onSave,
+  isSaving,
   onPrint,
 }: MobileMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
@@ -146,6 +150,15 @@ export default function MobileMenu({
                 <button onClick={handleClear} className={styles.menuButton}>
                   Clear Canvas
                 </button>
+                {onSave && (
+                  <button
+                    onClick={onSave}
+                    className={styles.menuButton}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? 'Saving...' : 'Save'}
+                  </button>
+                )}
                 <button onClick={onShare} className={styles.menuButton}>
                   Share Link
                 </button>

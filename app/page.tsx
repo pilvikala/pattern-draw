@@ -1,13 +1,15 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSession } from 'next-auth/react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import DrawingCanvas from '@/components/DrawingCanvas'
 import ColorPicker from '@/components/ColorPicker'
 import CompactColorPicker from '@/components/CompactColorPicker'
 import ColorPalette from '@/components/ColorPalette'
 import Controls from '@/components/Controls'
 import MobileMenu from '@/components/MobileMenu'
-import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
+import { encodeDrawing, decodeDrawing, serializeDrawing } from '@/lib/serialization'
 import type { DrawingData, MatrixPattern } from '@/lib/types'
 import UserMenu from '@/components/UserMenu'
 import styles from './page.module.css'
@@ -16,6 +18,9 @@ import styles from './page.module.css'
 export type { MatrixPattern, DrawingData } from '@/lib/types'
 
 export default function Home() {
+  const { data: session } = useSession()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [selectedColor, setSelectedColor] = useState('#000000')
   const [savedColors, setSavedColors] = useState<string[]>([])
   const [pattern, setPattern] = useState<MatrixPattern>('squares')
@@ -27,7 +32,9 @@ export default function Home() {
   const [grid, setGrid] = useState<{ [key: string]: string }>({})
   const gridRef = useRef<{ [key: string]: string }>({})
   const [isColorPickerMode, setIsColorPickerMode] = useState(false)
-  
+  const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+
   // Undo/Redo history
   const [history, setHistory] = useState<{ [key: string]: string }[]>([{}])
   const [historyIndex, setHistoryIndex] = useState(0)
@@ -36,38 +43,38 @@ export default function Home() {
   const historyIndexRef = useRef(0)
   const lastSavedGridRef = useRef<{ [key: string]: string }>({})
   const historyDebounceTimerRef = useRef<NodeJS.Timeout | null>(null)
-  
+
   // Keep grid ref in sync
   useEffect(() => {
     gridRef.current = grid
   }, [grid])
-  
+
   // Keep refs in sync with state
   useEffect(() => {
     historyRef.current = history
   }, [history])
-  
+
   useEffect(() => {
     historyIndexRef.current = historyIndex
   }, [historyIndex])
-  
+
   // Function to save current grid to history (debounced)
   const saveToHistory = useCallback(() => {
     const currentGrid = gridRef.current
-    
+
     // Check if grid has actually changed
     const currentGridStr = JSON.stringify(currentGrid)
     const lastSavedStr = JSON.stringify(lastSavedGridRef.current)
-    
+
     if (currentGridStr === lastSavedStr) {
       return // No change, don't save
     }
-    
+
     // Clear existing timer
     if (historyDebounceTimerRef.current) {
       clearTimeout(historyDebounceTimerRef.current)
     }
-    
+
     // Set new timer to save after 500ms
     historyDebounceTimerRef.current = setTimeout(() => {
       if (!isUndoRedoRef.current) {
@@ -97,25 +104,25 @@ export default function Home() {
       }
     }, 500)
   }, [])
-  
+
   // Save current grid to history immediately (bypass debounce)
   const saveToHistoryImmediate = useCallback(() => {
     const currentGrid = gridRef.current
-    
+
     // Clear any pending timer
     if (historyDebounceTimerRef.current) {
       clearTimeout(historyDebounceTimerRef.current)
       historyDebounceTimerRef.current = null
     }
-    
+
     // Check if grid has actually changed
     const currentGridStr = JSON.stringify(currentGrid)
     const lastSavedStr = JSON.stringify(lastSavedGridRef.current)
-    
+
     if (currentGridStr === lastSavedStr) {
       return // No change, don't save
     }
-    
+
     if (!isUndoRedoRef.current) {
       setHistory((hist) => {
         const currentIdx = historyIndexRef.current
@@ -142,7 +149,7 @@ export default function Home() {
       })
     }
   }, [])
-  
+
   // Cleanup timer on unmount
   useEffect(() => {
     return () => {
@@ -183,7 +190,7 @@ export default function Home() {
     }
   }, [])
 
-  // Load from URL if present
+  // Load from URL if present (for sharing)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
@@ -221,6 +228,46 @@ export default function Home() {
       }
     }
   }, [])
+
+  // Load from saved drawing ID if present
+  useEffect(() => {
+    const drawingId = searchParams.get('id')
+    if (drawingId && session?.user?.id) {
+      const loadDrawing = async () => {
+        try {
+          const response = await fetch(`/api/drawings/${drawingId}`)
+          if (response.ok) {
+            const { drawingData } = await response.json()
+            if (drawingData) {
+              setPattern(drawingData.pattern || 'squares')
+              setPixelSize(drawingData.pixelSize || 15)
+              const width = drawingData.canvasWidth || 20
+              const height = drawingData.canvasHeight || 20
+              setCanvasWidth(width)
+              setCanvasHeight(height)
+              setTempCanvasWidth(width.toString())
+              setTempCanvasHeight(height.toString())
+              setSavedColors(Object.values(drawingData.colors || {}))
+              const initialGrid = drawingData.grid || {}
+              setGrid(initialGrid)
+              gridRef.current = initialGrid
+              // Initialize history with loaded grid
+              const initialHistory = [initialGrid]
+              setHistory(initialHistory)
+              historyRef.current = initialHistory
+              setHistoryIndex(0)
+              historyIndexRef.current = 0
+              lastSavedGridRef.current = initialGrid
+              setCurrentDrawingId(drawingId)
+            }
+          }
+        } catch (e) {
+          console.error('Failed to load drawing', e)
+        }
+      }
+      loadDrawing()
+    }
+  }, [searchParams, session])
 
   // Save function that can be called manually - memoized with useCallback
   const saveToLocalStorage = useCallback(() => {
@@ -305,21 +352,21 @@ export default function Home() {
       setGrid((prev) => {
         const newGrid = { ...prev, [key]: color }
         gridRef.current = newGrid
-        
+
         // Schedule history save (debounced) if not in the middle of undo/redo
         if (!isUndoRedoRef.current) {
           saveToHistory()
         }
-        
+
         return newGrid
       })
     }
   }
-  
+
   const handleUndo = () => {
     // Save current state immediately if there are pending changes
     saveToHistoryImmediate()
-    
+
     // Use setTimeout to ensure state updates are processed
     setTimeout(() => {
       const currentIdx = historyIndexRef.current
@@ -340,11 +387,11 @@ export default function Home() {
       }
     }, 10)
   }
-  
+
   const handleRedo = () => {
     // Save current state immediately if there are pending changes
     saveToHistoryImmediate()
-    
+
     // Use setTimeout to ensure state updates are processed
     setTimeout(() => {
       const currentIdx = historyIndexRef.current
@@ -372,7 +419,7 @@ export default function Home() {
       clearTimeout(historyDebounceTimerRef.current)
       historyDebounceTimerRef.current = null
     }
-    
+
     const emptyGrid = {}
     setGrid(emptyGrid)
     gridRef.current = emptyGrid
@@ -428,10 +475,10 @@ export default function Home() {
       }, {} as { [key: string]: string }),
       grid,
     }
-    
+
     const encoded = await encodeDrawing(data)
     const url = `${window.location.origin}${window.location.pathname}?drawing=${encoded}`
-    
+
     if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(() => {
         alert('Link copied to clipboard!')
@@ -463,26 +510,26 @@ export default function Home() {
     // Draw grid with borders
     ctx.strokeStyle = '#ddd'
     ctx.lineWidth = 1
-    
+
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
         const key = `${row},${col}`
         const color = grid[key] || '#ffffff'
-        
+
         let x = col * pixelSize
         let y = row * pixelSize
-        
+
         // Adjust position for brick patterns
         if (pattern === 'bricks' && row % 2 === 1) {
           x += pixelSize / 2
         } else if (pattern === 'bricksVertical' && col % 2 === 1) {
           y += pixelSize / 2
         }
-        
+
         // Fill pixel
         ctx.fillStyle = color
         ctx.fillRect(x, y, pixelSize, pixelSize)
-        
+
         // Draw border
         ctx.strokeRect(x, y, pixelSize, pixelSize)
       }
@@ -499,6 +546,68 @@ export default function Home() {
         URL.revokeObjectURL(url)
       }
     })
+  }
+
+  const handleSave = async () => {
+    if (!session?.user?.id) {
+      alert('Please sign in to save drawings')
+      router.push('/auth/signin')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      const drawingData: DrawingData = {
+        pattern,
+        pixelSize,
+        canvasWidth,
+        canvasHeight,
+        colors: savedColors.reduce((acc, color, idx) => {
+          acc[idx.toString()] = color
+          return acc
+        }, {} as { [key: string]: string }),
+        grid,
+      }
+
+      if (currentDrawingId) {
+        // Update existing drawing
+        const response = await fetch(`/api/drawings/${currentDrawingId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ drawingData }),
+        })
+
+        if (response.ok) {
+          alert('Drawing updated!')
+        } else {
+          throw new Error('Failed to update drawing')
+        }
+      } else {
+        // Create new drawing
+        const response = await fetch('/api/drawings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ drawingData }),
+        })
+
+        if (response.ok) {
+          const { drawing } = await response.json()
+          setCurrentDrawingId(drawing.id)
+          alert('Drawing saved!')
+        } else {
+          throw new Error('Failed to save drawing')
+        }
+      }
+    } catch (error) {
+      console.error('Error saving drawing:', error)
+      alert('Failed to save drawing. Please try again.')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
 
@@ -552,7 +661,9 @@ export default function Home() {
               onClear={handleClear}
               onShare={handleShare}
               onDownload={handleDownload}
-              onPrint={() => {}}
+              onSave={handleSave}
+              isSaving={isSaving}
+              onPrint={() => { }}
             />
           </div>
         </div>
@@ -606,7 +717,9 @@ export default function Home() {
             onClear={handleClear}
             onShare={handleShare}
             onDownload={handleDownload}
-            onPrint={() => {}}
+            onSave={handleSave}
+            isSaving={isSaving}
+            onPrint={() => { }}
           />
         </div>
 

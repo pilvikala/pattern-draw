@@ -16,6 +16,8 @@ interface ControlsProps {
   onClear: () => void
   onShare: () => void
   onDownload: () => void
+  onSave?: () => void
+  isSaving?: boolean
   onPrint: () => void
   // onPrint is kept for compatibility but not used
 }
@@ -33,6 +35,8 @@ export default function Controls({
   onClear,
   onShare,
   onDownload,
+  onSave,
+  isSaving,
   onPrint,
 }: ControlsProps) {
   const handleClear = () => {
@@ -106,6 +110,15 @@ export default function Controls({
         <button onClick={handleClear} className={styles.button}>
           Clear Canvas
         </button>
+        {onSave && (
+          <button
+            onClick={onSave}
+            className={styles.button}
+            disabled={isSaving}
+          >
+            {isSaving ? 'Saving...' : 'Save'}
+          </button>
+        )}
         <button onClick={onShare} className={styles.button}>
           Share Link
         </button>

@@ -101,6 +101,13 @@ export default function UserMenu({ className }: UserMenuProps = {}) {
             </div>
           </div>
           <div className={styles.menuDivider} />
+          <Link
+            href="/drawings"
+            onClick={() => setIsOpen(false)}
+            className={styles.menuItem}
+          >
+            My Drawings
+          </Link>
           <button
             onClick={() => {
               signOut({ callbackUrl: '/' })
