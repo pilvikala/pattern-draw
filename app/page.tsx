@@ -9,6 +9,7 @@ import Controls from '@/components/Controls'
 import MobileMenu from '@/components/MobileMenu'
 import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
 import type { DrawingData, MatrixPattern } from '@/lib/types'
+import UserMenu from '@/components/UserMenu'
 import styles from './page.module.css'
 
 // Re-export types for backward compatibility
@@ -536,7 +537,9 @@ export default function Home() {
               </div>
             )}
           </div>
-          <MobileMenu
+          <div className={styles.headerRight}>
+            <UserMenu />
+            <MobileMenu
               pattern={pattern}
               pixelSize={pixelSize}
               tempCanvasWidth={tempCanvasWidth}
@@ -551,6 +554,7 @@ export default function Home() {
               onDownload={handleDownload}
               onPrint={() => {}}
             />
+          </div>
         </div>
 
         <div className={styles.topBar}>

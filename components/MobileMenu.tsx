@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { MatrixPattern } from '@/lib/types'
+import UserMenu from './UserMenu'
 import styles from './MobileMenu.module.css'
 
 interface MobileMenuProps {
@@ -78,6 +79,10 @@ export default function MobileMenu({
             </div>
 
             <div className={styles.menuContent}>
+              <div className={styles.userMenuSection}>
+                <UserMenu className="mobile" />
+              </div>
+
               <div className={styles.menuItem}>
                 <label className={styles.label}>Matrix Pattern</label>
                 <select
