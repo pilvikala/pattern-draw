@@ -19,6 +19,7 @@ model User {
   password      String?   // Hashed password for email/password auth
   accounts      Account[]
   sessions      Session[]
+  drawings      Drawing[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -56,4 +57,16 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model Drawing {
+  id        String   @id @default(cuid())
+  ownerId   String
+  drawing   String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([updatedAt])
 }
