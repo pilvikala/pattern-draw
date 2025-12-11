@@ -32,6 +32,8 @@ export default function DrawingCanvas({
   const pinchStartDistanceRef = useRef<number | null>(null)
   const pinchStartZoomRef = useRef<number>(1.0)
   const isPinchingRef = useRef(false)
+  const drawStartTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const pendingDrawRef = useRef<{ row: number; col: number } | null>(null)
 
   const dimensions = { cols: canvasWidth, rows: canvasHeight }
 
@@ -113,6 +115,13 @@ export default function DrawingCanvas({
   }
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
+    // Cancel any pending draw if a second touch appears
+    if (drawStartTimerRef.current) {
+      clearTimeout(drawStartTimerRef.current)
+      drawStartTimerRef.current = null
+      pendingDrawRef.current = null
+    }
+
     // Check if this is a pinch gesture (2 touches)
     if (e.touches.length === 2) {
       e.preventDefault()
@@ -177,12 +186,20 @@ export default function DrawingCanvas({
 
       if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
         if (isColorPickerMode) {
-          // Color picker mode - just pick the color
+          // Color picker mode - just pick the color immediately
           handlePixelClick(row, col)
         } else {
-          // Drawing mode - start drawing
-          setIsDrawing(true)
-          handlePixelClick(row, col)
+          // Drawing mode - delay start to detect if second finger is coming
+          pendingDrawRef.current = { row, col }
+          drawStartTimerRef.current = setTimeout(() => {
+            // Only start drawing if we're still in single touch mode
+            if (!isPinchingRef.current && pendingDrawRef.current) {
+              setIsDrawing(true)
+              handlePixelClick(pendingDrawRef.current.row, pendingDrawRef.current.col)
+              pendingDrawRef.current = null
+            }
+            drawStartTimerRef.current = null
+          }, 50) // 50ms delay to detect second touch
         }
       }
     }
@@ -190,10 +207,31 @@ export default function DrawingCanvas({
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     // Handle pinch gesture
-    if (e.touches.length === 2 && pinchStartDistanceRef.current !== null) {
+    if (e.touches.length === 2) {
       e.preventDefault()
+
+      // Cancel any pending draw
+      if (drawStartTimerRef.current) {
+        clearTimeout(drawStartTimerRef.current)
+        drawStartTimerRef.current = null
+        pendingDrawRef.current = null
+      }
+
       isPinchingRef.current = true
       setIsDrawing(false)
+
+      // Initialize pinch if not already started
+      if (pinchStartDistanceRef.current === null) {
+        const touch1 = e.touches[0]
+        const touch2 = e.touches[1]
+        const distance = Math.hypot(
+          touch2.clientX - touch1.clientX,
+          touch2.clientY - touch1.clientY
+        )
+        pinchStartDistanceRef.current = distance
+        pinchStartZoomRef.current = zoom
+        return
+      }
 
       const touch1 = e.touches[0]
       const touch2 = e.touches[1]
@@ -258,6 +296,14 @@ export default function DrawingCanvas({
 
   const handleTouchEnd = useCallback(() => {
     setIsDrawing(false)
+
+    // Cancel any pending draw
+    if (drawStartTimerRef.current) {
+      clearTimeout(drawStartTimerRef.current)
+      drawStartTimerRef.current = null
+      pendingDrawRef.current = null
+    }
+
     // Reset pinch state when all touches end
     if (isPinchingRef.current) {
       isPinchingRef.current = false
@@ -293,6 +339,12 @@ export default function DrawingCanvas({
       container.removeEventListener('touchmove', handleTouchMove)
       container.removeEventListener('touchend', handleTouchEnd)
       container.removeEventListener('touchcancel', handleTouchEnd)
+
+      // Clean up any pending draw timer
+      if (drawStartTimerRef.current) {
+        clearTimeout(drawStartTimerRef.current)
+        drawStartTimerRef.current = null
+      }
     }
   }, [handleTouchStart, handleTouchMove, handleTouchEnd])
 
