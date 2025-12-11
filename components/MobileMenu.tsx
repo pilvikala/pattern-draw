@@ -44,7 +44,7 @@ export default function MobileMenu({
   const [isOpen, setIsOpen] = useState(false)
 
   const handleClear = () => {
-    if (confirm('Are you sure you want to clear the canvas?')) {
+    if (confirm('Are you sure you want to create a new drawing? This will clear the current canvas.')) {
       onClear()
       setIsOpen(false)
     }
@@ -148,7 +148,7 @@ export default function MobileMenu({
 
               <div className={styles.menuActions}>
                 <button onClick={handleClear} className={styles.menuButton}>
-                  Clear Canvas
+                  New Drawing
                 </button>
                 {onSave && (
                   <button

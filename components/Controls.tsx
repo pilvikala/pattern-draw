@@ -40,7 +40,7 @@ export default function Controls({
   onPrint,
 }: ControlsProps) {
   const handleClear = () => {
-    if (confirm('Are you sure you want to clear the canvas?')) {
+    if (confirm('Are you sure you want to create a new drawing? This will clear the current canvas.')) {
       onClear()
     }
   }
@@ -108,7 +108,7 @@ export default function Controls({
 
       <div className={styles.buttonGroup}>
         <button onClick={handleClear} className={styles.button}>
-          Clear Canvas
+          New Drawing
         </button>
         {onSave && (
           <button
