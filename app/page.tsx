@@ -423,6 +423,12 @@ function HomeContent() {
     const emptyGrid = {}
     setGrid(emptyGrid)
     gridRef.current = emptyGrid
+    // Reset currentDrawingId so future saves create a new drawing instead of updating
+    setCurrentDrawingId(null)
+    // Clear the URL parameter if present
+    if (searchParams.get('id')) {
+      router.replace(window.location.pathname)
+    }
     // Add clear to history immediately (not debounced)
     setHistory((hist) => {
       const currentIdx = historyIndexRef.current
