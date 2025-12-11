@@ -26,8 +26,13 @@ export default function DrawingCanvas({
   isColorPickerMode,
 }: DrawingCanvasProps) {
   const [isDrawing, setIsDrawing] = useState(false)
+  const [zoom, setZoom] = useState(1.0)
   const containerRef = useRef<HTMLDivElement>(null)
-  
+  const zoomContainerRef = useRef<HTMLDivElement>(null)
+  const pinchStartDistanceRef = useRef<number | null>(null)
+  const pinchStartZoomRef = useRef<number>(1.0)
+  const isPinchingRef = useRef(false)
+
   const dimensions = { cols: canvasWidth, rows: canvasHeight }
 
   const getPixelKey = (row: number, col: number): string => {
@@ -56,14 +61,16 @@ export default function DrawingCanvas({
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
     if (!isDrawing || !containerRef.current || isColorPickerMode) return
-    
+
     const rect = containerRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-    
+    // Account for zoom when calculating coordinates
+    // getBoundingClientRect() returns transformed coordinates, so we divide by zoom
+    const x = (e.clientX - rect.left) / zoom
+    const y = (e.clientY - rect.top) / zoom
+
     let row: number
     let col: number
-    
+
     if (pattern === 'bricks') {
       // Horizontal offset: odd rows are offset horizontally
       row = Math.floor(y / pixelSize)
@@ -91,7 +98,7 @@ export default function DrawingCanvas({
       col = Math.floor(x / pixelSize)
       row = Math.floor(y / pixelSize)
     }
-    
+
     if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
       handlePixelClick(row, col)
     }
@@ -106,17 +113,40 @@ export default function DrawingCanvas({
   }
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
+    // Check if this is a pinch gesture (2 touches)
+    if (e.touches.length === 2) {
+      e.preventDefault()
+      isPinchingRef.current = true
+      setIsDrawing(false)
+
+      const touch1 = e.touches[0]
+      const touch2 = e.touches[1]
+      const distance = Math.hypot(
+        touch2.clientX - touch1.clientX,
+        touch2.clientY - touch1.clientY
+      )
+      pinchStartDistanceRef.current = distance
+      pinchStartZoomRef.current = zoom
+      return
+    }
+
+    // Single touch - drawing mode
+    if (isPinchingRef.current) {
+      return
+    }
+
     e.preventDefault()
-    
+
     const touch = e.touches[0]
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect()
-      const x = touch.clientX - rect.left
-      const y = touch.clientY - rect.top
-      
+      // Account for zoom when calculating coordinates
+      const x = (touch.clientX - rect.left) / zoom
+      const y = (touch.clientY - rect.top) / zoom
+
       let row: number
       let col: number
-      
+
       if (pattern === 'bricks') {
         // Horizontal offset: odd rows are offset horizontally
         row = Math.floor(y / pixelSize)
@@ -144,7 +174,7 @@ export default function DrawingCanvas({
         col = Math.floor(x / pixelSize)
         row = Math.floor(y / pixelSize)
       }
-      
+
       if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
         if (isColorPickerMode) {
           // Color picker mode - just pick the color
@@ -156,21 +186,42 @@ export default function DrawingCanvas({
         }
       }
     }
-  }, [isColorPickerMode, pattern, pixelSize, dimensions, handlePixelClick])
+  }, [isColorPickerMode, pattern, pixelSize, dimensions, handlePixelClick, zoom])
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
-    if (!isDrawing || isColorPickerMode) return
+    // Handle pinch gesture
+    if (e.touches.length === 2 && pinchStartDistanceRef.current !== null) {
+      e.preventDefault()
+      isPinchingRef.current = true
+      setIsDrawing(false)
+
+      const touch1 = e.touches[0]
+      const touch2 = e.touches[1]
+      const currentDistance = Math.hypot(
+        touch2.clientX - touch1.clientX,
+        touch2.clientY - touch1.clientY
+      )
+
+      const scale = currentDistance / pinchStartDistanceRef.current
+      const newZoom = Math.max(0.5, Math.min(3.0, pinchStartZoomRef.current * scale))
+      setZoom(newZoom)
+      return
+    }
+
+    // Single touch - drawing mode
+    if (isPinchingRef.current || !isDrawing || isColorPickerMode) return
     e.preventDefault()
-    
+
     const touch = e.touches[0]
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect()
-      const x = touch.clientX - rect.left
-      const y = touch.clientY - rect.top
-      
+      // Account for zoom when calculating coordinates
+      const x = (touch.clientX - rect.left) / zoom
+      const y = (touch.clientY - rect.top) / zoom
+
       let row: number
       let col: number
-      
+
       if (pattern === 'bricks') {
         // Horizontal offset: odd rows are offset horizontally
         row = Math.floor(y / pixelSize)
@@ -198,15 +249,33 @@ export default function DrawingCanvas({
         col = Math.floor(x / pixelSize)
         row = Math.floor(y / pixelSize)
       }
-      
+
       if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
         handlePixelClick(row, col)
       }
     }
-  }, [isDrawing, isColorPickerMode, pattern, pixelSize, dimensions, handlePixelClick])
+  }, [isDrawing, isColorPickerMode, pattern, pixelSize, dimensions, handlePixelClick, zoom])
 
   const handleTouchEnd = useCallback(() => {
     setIsDrawing(false)
+    // Reset pinch state when all touches end
+    if (isPinchingRef.current) {
+      isPinchingRef.current = false
+      pinchStartDistanceRef.current = null
+    }
+  }, [])
+
+  // Zoom controls
+  const handleZoomIn = useCallback(() => {
+    setZoom((prev) => Math.min(3.0, prev + 0.1))
+  }, [])
+
+  const handleZoomOut = useCallback(() => {
+    setZoom((prev) => Math.max(0.5, prev - 0.1))
+  }, [])
+
+  const handleZoomReset = useCallback(() => {
+    setZoom(1.0)
   }, [])
 
   // Add non-passive touch event listeners to container
@@ -230,7 +299,7 @@ export default function DrawingCanvas({
   const renderSquare = (row: number, col: number) => {
     const color = getPixelColor(row, col)
     const key = getPixelKey(row, col)
-    
+
     return (
       <div
         key={key}
@@ -251,7 +320,7 @@ export default function DrawingCanvas({
     const key = getPixelKey(row, col)
     const isOffset = row % 2 === 1
     const offset = isOffset ? pixelSize / 2 : 0
-    
+
     return (
       <div
         key={key}
@@ -273,7 +342,7 @@ export default function DrawingCanvas({
     const key = getPixelKey(row, col)
     const isOffset = col % 2 === 1
     const offset = isOffset ? pixelSize / 2 : 0
-    
+
     return (
       <div
         key={key}
@@ -291,37 +360,77 @@ export default function DrawingCanvas({
   }
 
   return (
-    <div
-      ref={containerRef}
-      className={`${styles.canvas} ${isColorPickerMode ? styles.colorPickerMode : ''}`}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(${dimensions.cols}, ${pixelSize}px)`,
-        gridTemplateRows: `repeat(${dimensions.rows}, ${pixelSize}px)`,
-        userSelect: 'none',
-        touchAction: 'none',
-        position: 'relative',
-        width: pattern === 'bricks' ? `${dimensions.cols * pixelSize + pixelSize / 2}px` : `${dimensions.cols * pixelSize}px`,
-        height: pattern === 'bricksVertical' ? `${dimensions.rows * pixelSize + pixelSize / 2}px` : `${dimensions.rows * pixelSize}px`,
-        maxWidth: '100%',
-        maxHeight: '100%',
-        margin: 'auto',
-      }}
-      onMouseMove={handleCanvasMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseLeave}
-    >
-      {Array.from({ length: dimensions.rows }).map((_, row) =>
-        Array.from({ length: dimensions.cols }).map((_, col) => {
-          if (pattern === 'bricks') {
-            return renderBrick(row, col)
-          } else if (pattern === 'bricksVertical') {
-            return renderBrickVertical(row, col)
-          } else {
-            return renderSquare(row, col)
-          }
-        })
-      )}
+    <div className={styles.zoomWrapper}>
+      {/* Desktop zoom controls */}
+      <div className={styles.zoomControls}>
+        <button
+          className={styles.zoomButton}
+          onClick={handleZoomOut}
+          aria-label="Zoom out"
+          title="Zoom out"
+        >
+          −
+        </button>
+        <button
+          className={styles.zoomButton}
+          onClick={handleZoomReset}
+          aria-label="Reset zoom"
+          title="Reset zoom"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <button
+          className={styles.zoomButton}
+          onClick={handleZoomIn}
+          aria-label="Zoom in"
+          title="Zoom in"
+        >
+          +
+        </button>
+      </div>
+
+      {/* Zoom container */}
+      <div
+        ref={zoomContainerRef}
+        className={styles.zoomContainer}
+        style={{
+          transform: `scale(${zoom})`,
+          transformOrigin: 'center center',
+        }}
+      >
+        <div
+          ref={containerRef}
+          className={`${styles.canvas} ${isColorPickerMode ? styles.colorPickerMode : ''}`}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${dimensions.cols}, ${pixelSize}px)`,
+            gridTemplateRows: `repeat(${dimensions.rows}, ${pixelSize}px)`,
+            userSelect: 'none',
+            touchAction: 'none',
+            position: 'relative',
+            width: pattern === 'bricks' ? `${dimensions.cols * pixelSize + pixelSize / 2}px` : `${dimensions.cols * pixelSize}px`,
+            height: pattern === 'bricksVertical' ? `${dimensions.rows * pixelSize + pixelSize / 2}px` : `${dimensions.rows * pixelSize}px`,
+            maxWidth: '100%',
+            maxHeight: '100%',
+            margin: 'auto',
+          }}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseLeave}
+        >
+          {Array.from({ length: dimensions.rows }).map((_, row) =>
+            Array.from({ length: dimensions.cols }).map((_, col) => {
+              if (pattern === 'bricks') {
+                return renderBrick(row, col)
+              } else if (pattern === 'bricksVertical') {
+                return renderBrickVertical(row, col)
+              } else {
+                return renderSquare(row, col)
+              }
+            })
+          )}
+        </div>
+      </div>
     </div>
   )
 }
