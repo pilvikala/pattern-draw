@@ -199,7 +199,7 @@ export default function DrawingCanvas({
               pendingDrawRef.current = null
             }
             drawStartTimerRef.current = null
-          }, 50) // 50ms delay to detect second touch
+          }, 30) // 30ms delay to detect second touch
         }
       }
     }
