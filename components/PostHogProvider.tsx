@@ -16,7 +16,11 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
           api_host: posthogHost,
           // Enable session replay
           session_recording: {
-            recordCrossOriginIframes: true,
+            // WARNING: Enabling cross-origin iframe recording may capture sensitive
+            // information from third-party content. Only enable via
+            // NEXT_PUBLIC_POSTHOG_RECORD_CROSS_ORIGIN_IFRAMES='true' after review.
+            recordCrossOriginIframes:
+              process.env.NEXT_PUBLIC_POSTHOG_RECORD_CROSS_ORIGIN_IFRAMES === 'true',
           },
           // Capture pageviews automatically
           loaded: (ph) => {
