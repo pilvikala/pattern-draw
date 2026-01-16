@@ -38,10 +38,11 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
 
   // Identify users when they sign in
   useEffect(() => {
-    if (session?.user && typeof window !== 'undefined' && posthog && posthog.__loaded) {
-      posthog.identify(session.user.id, {
-        email: session.user.email,
-        name: session.user.name,
+    const userId = session?.user?.id
+    if (userId && typeof window !== 'undefined' && posthog && posthog.__loaded) {
+      posthog.identify(userId, {
+        email: session.user?.email,
+        name: session.user?.name,
       })
     }
   }, [session])
