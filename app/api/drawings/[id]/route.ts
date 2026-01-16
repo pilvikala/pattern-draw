@@ -7,7 +7,7 @@ import type { DrawingData } from '@/lib/types'
 // GET /api/drawings/[id] - Load a specific drawing
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const session = await auth()
@@ -19,9 +19,10 @@ export async function GET(
             )
         }
 
+        const { id } = await params
         const drawing = await prisma.drawing.findUnique({
             where: {
-                id: params.id,
+                id,
             },
             select: {
                 id: true,
@@ -75,7 +76,7 @@ export async function GET(
 // PUT /api/drawings/[id] - Update a drawing
 export async function PUT(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const session = await auth()
@@ -87,6 +88,7 @@ export async function PUT(
             )
         }
 
+        const { id } = await params
         const body = await request.json()
         const { drawingData } = body
 
@@ -100,7 +102,7 @@ export async function PUT(
         // Check if drawing exists and user owns it
         const existingDrawing = await prisma.drawing.findUnique({
             where: {
-                id: params.id,
+                id,
             },
             select: {
                 ownerId: true,
@@ -126,7 +128,7 @@ export async function PUT(
 
         const drawing = await prisma.drawing.update({
             where: {
-                id: params.id,
+                id,
             },
             data: {
                 drawing: serialized,
@@ -151,7 +153,7 @@ export async function PUT(
 // DELETE /api/drawings/[id] - Delete a drawing
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const session = await auth()
@@ -163,10 +165,11 @@ export async function DELETE(
             )
         }
 
+        const { id } = await params
         // Check if drawing exists and user owns it
         const existingDrawing = await prisma.drawing.findUnique({
             where: {
-                id: params.id,
+                id,
             },
             select: {
                 ownerId: true,
@@ -189,7 +192,7 @@ export async function DELETE(
 
         await prisma.drawing.delete({
             where: {
-                id: params.id,
+                id,
             },
         })
 

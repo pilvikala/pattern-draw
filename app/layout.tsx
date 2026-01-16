@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { SessionProvider } from '@/components/SessionProvider'
+import { PostHogProvider } from '@/components/PostHogProvider'
 
 export const metadata: Metadata = {
   title: 'Pattern Draw - Pixel Art Creator',
@@ -22,7 +23,8 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <SessionProvider>{children}</SessionProvider>
+
+        <SessionProvider><PostHogProvider>{children}</PostHogProvider></SessionProvider>
       </body>
     </html>
   )
