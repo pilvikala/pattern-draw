@@ -6,7 +6,9 @@ import { prisma } from './prisma'
 import bcrypt from 'bcryptjs'
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  trustHost: true, // Required for Next.js 15 with Auth.js v5
+  trustHost: process.env.NEXTAUTH_TRUST_HOST
+    ? process.env.NEXTAUTH_TRUST_HOST.split(',').map((host) => host.trim()).filter(Boolean)
+    : undefined,
   adapter: PrismaAdapter(prisma) as any,
   providers: [
     Google({
