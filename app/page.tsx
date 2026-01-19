@@ -753,7 +753,7 @@ function HomeContent() {
             </div>
           </div>
         </div>
-        
+
         {/* Panel toggle button - positioned outside panel for proper z-index */}
         <button
           className={`${styles.panelToggle} ${isPanelCollapsed ? styles.collapsed : ''}`}
@@ -763,11 +763,11 @@ function HomeContent() {
         >
           {isPanelCollapsed ? (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 18l6-6-6-6" />
+              <path d="M15 18l-6-6 6-6" />
             </svg>
           ) : (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 18l-6-6 6-6" />
+              <path d="M9 18l6-6-6-6" />
             </svg>
           )}
         </button>
