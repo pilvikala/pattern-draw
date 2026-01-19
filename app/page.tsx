@@ -457,12 +457,12 @@ function HomeContent() {
   const handleSetCanvasSize = () => {
     const width = parseInt(tempCanvasWidth)
     const height = parseInt(tempCanvasHeight)
-    if (!isNaN(width) && width >= 10 && width <= 200) {
+    if (!isNaN(width) && width >= 2 && width <= 500) {
       setCanvasWidth(width)
     } else {
       setTempCanvasWidth(canvasWidth.toString())
     }
-    if (!isNaN(height) && height >= 10 && height <= 200) {
+    if (!isNaN(height) && height >= 2 && height <= 500) {
       setCanvasHeight(height)
     } else {
       setTempCanvasHeight(canvasHeight.toString())
