@@ -273,11 +273,6 @@
     display: none;
   }
 
-  .toolsPanel.collapsed {
-    min-width: 0;
-    width: 0;
-  }
-
   .panelSection {
     display: flex;
     flex-direction: column;
