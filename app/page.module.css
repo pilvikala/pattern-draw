@@ -110,6 +110,15 @@
   height: 100%;
 }
 
+.toolsPanel {
+  display: none;
+}
+
+.leftSection {
+  display: flex;
+  flex-direction: column;
+}
+
 .desktopControls,
 .desktopColorSection {
   display: none;
@@ -117,22 +126,40 @@
 
 @media (min-width: 768px) {
   .main {
-    padding: 2rem;
+    padding: 0;
   }
 
   .container {
-    max-width: 1400px;
-    margin: 0 auto;
-    height: auto;
-    min-height: 100vh;
+    max-width: 100%;
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    position: relative;
+  }
+
+  .leftSection {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+    position: relative;
+    z-index: 1;
+  }
+
+  .container.panelCollapsed .leftSection {
+    margin-right: 20px;
   }
 
   .header {
-    padding: 1rem 0;
+    padding: 1rem 2rem;
     border-bottom: none;
     background: transparent;
     justify-content: center;
     position: relative;
+    flex-shrink: 0;
   }
 
   .titleContainer {
@@ -157,43 +184,125 @@
   }
 
   .canvasContainer {
-    padding: 1rem;
+    flex: 1;
+    padding: 2rem;
     background: white;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    margin-bottom: 2rem;
-    min-height: 600px;
+    margin: 2rem;
     overflow: auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 0;
+    position: relative;
+    z-index: 0;
+  }
+
+  .toolsPanel {
+    display: block;
+    flex: 0 0 30%;
+    background: white;
+    border-left: 1px solid #eee;
+    padding: 1rem;
+    position: relative;
+    height: 100vh;
+    overflow-y: auto;
+    overflow-x: visible;
+    transition: flex 0.3s ease, min-width 0.3s ease;
+    min-width: 0;
+    z-index: 100;
+  }
+
+  .toolsPanel.collapsed {
+    flex: 0 0 1px;
+    min-width: 1px;
+    padding: 0;
+    overflow: visible;
+    border-left: none;
+  }
+
+  .panelToggle {
+    position: absolute;
+    right: calc(30% - 20px);
+    top: 50%;
+    transform: translateY(-50%);
+    width: 40px;
+    height: 40px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    transition: right 0.3s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    color: #333;
+    pointer-events: auto;
+  }
+
+  .panelToggle.collapsed {
+    right: -20px;
+  }
+
+  .panelToggle.collapsed:hover {
+    right: -10px;
+    transform: translateY(-50%) scale(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+
+  .panelToggle:hover {
+    background: #f5f5f5;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  }
+
+  .panelContent {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    height: 100%;
+  }
+
+  .toolsPanel.collapsed .panelContent {
+    display: none;
+  }
+
+  .panelSection {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
   }
 
   .desktopControls {
-    display: block;
-    margin-bottom: 1.5rem;
+    display: none;
   }
 
   .desktopColorSection {
-    display: flex;
-    gap: 2rem;
-    margin-bottom: 2rem;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-items: flex-start;
+    display: none;
   }
 }
 
 @media print {
   .header,
   .topBar,
-  .desktopControls,
-  .desktopColorSection {
+  .toolsPanel {
     display: none;
   }
-  
+
+  .container {
+    display: block;
+  }
+
+  .leftSection {
+    display: block;
+  }
+
   .canvasContainer {
     box-shadow: none;
     padding: 0;
     margin: 0;
+    flex: none;
   }
 }
-
-

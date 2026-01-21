@@ -83,7 +83,7 @@ export default function Controls({
           value={tempCanvasWidth}
           onChange={(e) => onTempCanvasWidthChange(e.target.value)}
           className={styles.textInput}
-          placeholder="10-200"
+          placeholder="2-500"
         />
       </div>
 
@@ -96,7 +96,7 @@ export default function Controls({
           value={tempCanvasHeight}
           onChange={(e) => onTempCanvasHeightChange(e.target.value)}
           className={styles.textInput}
-          placeholder="10-200"
+          placeholder="2-500"
         />
       </div>
 

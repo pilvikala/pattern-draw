@@ -34,6 +34,7 @@ function HomeContent() {
   const [isColorPickerMode, setIsColorPickerMode] = useState(false)
   const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
 
   // Undo/Redo history
   const [history, setHistory] = useState<{ [key: string]: string }[]>([{}])
@@ -457,12 +458,12 @@ function HomeContent() {
   const handleSetCanvasSize = () => {
     const width = parseInt(tempCanvasWidth)
     const height = parseInt(tempCanvasHeight)
-    if (!isNaN(width) && width >= 10 && width <= 200) {
+    if (!isNaN(width) && width >= 2 && width <= 500) {
       setCanvasWidth(width)
     } else {
       setTempCanvasWidth(canvasWidth.toString())
     }
-    if (!isNaN(height) && height >= 10 && height <= 200) {
+    if (!isNaN(height) && height >= 2 && height <= 500) {
       setCanvasHeight(height)
     } else {
       setTempCanvasHeight(canvasHeight.toString())
@@ -619,135 +620,157 @@ function HomeContent() {
 
   return (
     <main className={styles.main}>
-      <div className={styles.container}>
-        <div className={styles.header}>
-          <div className={styles.titleContainer}>
-            <h1 className={styles.title}>Pattern Draw</h1>
-            {(history.length > 1 || historyIndex < history.length - 1) && (
-              <div className={styles.undoRedoButtons}>
-                <button
-                  onClick={handleUndo}
-                  disabled={historyIndex === 0}
-                  className={styles.undoRedoButton}
-                  aria-label="Undo"
-                  title="Undo"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 7v6h6" />
-                    <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
-                  </svg>
-                </button>
-                <button
-                  onClick={handleRedo}
-                  disabled={historyIndex >= history.length - 1}
-                  className={styles.undoRedoButton}
-                  aria-label="Redo"
-                  title="Redo"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 7v6h-6" />
-                    <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
-                  </svg>
-                </button>
-              </div>
-            )}
+      <div className={`${styles.container} ${isPanelCollapsed ? styles.panelCollapsed : ''}`}>
+        <div className={styles.leftSection}>
+          <div className={styles.header}>
+            <div className={styles.titleContainer}>
+              <h1 className={styles.title}>Pattern Draw</h1>
+              {(history.length > 1 || historyIndex < history.length - 1) && (
+                <div className={styles.undoRedoButtons}>
+                  <button
+                    onClick={handleUndo}
+                    disabled={historyIndex === 0}
+                    className={styles.undoRedoButton}
+                    aria-label="Undo"
+                    title="Undo"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 7v6h6" />
+                      <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={handleRedo}
+                    disabled={historyIndex >= history.length - 1}
+                    className={styles.undoRedoButton}
+                    aria-label="Redo"
+                    title="Redo"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 7v6h-6" />
+                      <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className={styles.headerRight}>
+              <UserMenu />
+              <MobileMenu
+                pattern={pattern}
+                pixelSize={pixelSize}
+                tempCanvasWidth={tempCanvasWidth}
+                tempCanvasHeight={tempCanvasHeight}
+                onPatternChange={setPattern}
+                onPixelSizeChange={setPixelSize}
+                onTempCanvasWidthChange={setTempCanvasWidth}
+                onTempCanvasHeightChange={setTempCanvasHeight}
+                onSetCanvasSize={handleSetCanvasSize}
+                onClear={handleClear}
+                onShare={handleShare}
+                onDownload={handleDownload}
+                onSave={handleSave}
+                isSaving={isSaving}
+                onPrint={() => { }}
+              />
+            </div>
           </div>
-          <div className={styles.headerRight}>
-            <UserMenu />
-            <MobileMenu
+
+          <div className={styles.topBar}>
+            <div className={styles.colorTools}>
+              <CompactColorPicker
+                selectedColor={selectedColor}
+                onColorChange={setSelectedColor}
+                onColorSave={handleColorSave}
+                isColorPickerMode={isColorPickerMode}
+                onColorPickerModeToggle={setIsColorPickerMode}
+              />
+              <ColorPalette
+                colors={savedColors}
+                selectedColor={selectedColor}
+                onColorSelect={handleColorSelect}
+                onColorPick={handleColorPick}
+                onColorRemove={(color) => {
+                  setSavedColors(savedColors.filter((c) => c !== color))
+                }}
+              />
+            </div>
+          </div>
+
+          <div className={styles.canvasContainer}>
+            <DrawingCanvas
               pattern={pattern}
               pixelSize={pixelSize}
-              tempCanvasWidth={tempCanvasWidth}
-              tempCanvasHeight={tempCanvasHeight}
-              onPatternChange={setPattern}
-              onPixelSizeChange={setPixelSize}
-              onTempCanvasWidthChange={setTempCanvasWidth}
-              onTempCanvasHeightChange={setTempCanvasHeight}
-              onSetCanvasSize={handleSetCanvasSize}
-              onClear={handleClear}
-              onShare={handleShare}
-              onDownload={handleDownload}
-              onSave={handleSave}
-              isSaving={isSaving}
-              onPrint={() => { }}
-            />
-          </div>
-        </div>
-
-        <div className={styles.topBar}>
-          <div className={styles.colorTools}>
-            <CompactColorPicker
+              canvasWidth={canvasWidth}
+              canvasHeight={canvasHeight}
               selectedColor={selectedColor}
-              onColorChange={setSelectedColor}
-              onColorSave={handleColorSave}
+              grid={grid}
+              onPixelFill={handlePixelFill}
               isColorPickerMode={isColorPickerMode}
-              onColorPickerModeToggle={setIsColorPickerMode}
-            />
-            <ColorPalette
-              colors={savedColors}
-              selectedColor={selectedColor}
-              onColorSelect={handleColorSelect}
-              onColorPick={handleColorPick}
-              onColorRemove={(color) => {
-                setSavedColors(savedColors.filter((c) => c !== color))
-              }}
             />
           </div>
         </div>
 
-        <div className={styles.canvasContainer}>
-          <DrawingCanvas
-            pattern={pattern}
-            pixelSize={pixelSize}
-            canvasWidth={canvasWidth}
-            canvasHeight={canvasHeight}
-            selectedColor={selectedColor}
-            grid={grid}
-            onPixelFill={handlePixelFill}
-            isColorPickerMode={isColorPickerMode}
-          />
+        {/* Desktop tools panel - hidden on mobile */}
+        <div className={`${styles.toolsPanel} ${isPanelCollapsed ? styles.collapsed : ''}`}>
+          <div className={styles.panelContent}>
+            <div className={styles.panelSection}>
+              <Controls
+                pattern={pattern}
+                pixelSize={pixelSize}
+                tempCanvasWidth={tempCanvasWidth}
+                tempCanvasHeight={tempCanvasHeight}
+                onPatternChange={setPattern}
+                onPixelSizeChange={setPixelSize}
+                onTempCanvasWidthChange={setTempCanvasWidth}
+                onTempCanvasHeightChange={setTempCanvasHeight}
+                onSetCanvasSize={handleSetCanvasSize}
+                onClear={handleClear}
+                onShare={handleShare}
+                onDownload={handleDownload}
+                onSave={handleSave}
+                isSaving={isSaving}
+                onPrint={() => { }}
+              />
+            </div>
+            <div className={styles.panelSection}>
+              <ColorPicker
+                selectedColor={selectedColor}
+                onColorChange={setSelectedColor}
+                onColorSave={handleColorSave}
+                isColorPickerMode={isColorPickerMode}
+                onColorPickerModeToggle={setIsColorPickerMode}
+              />
+              <ColorPalette
+                colors={savedColors}
+                selectedColor={selectedColor}
+                onColorSelect={handleColorSelect}
+                onColorPick={handleColorPick}
+                onColorRemove={(color) => {
+                  setSavedColors(savedColors.filter((c) => c !== color))
+                }}
+              />
+            </div>
+          </div>
         </div>
 
-        {/* Desktop controls - hidden on mobile */}
-        <div className={styles.desktopControls}>
-          <Controls
-            pattern={pattern}
-            pixelSize={pixelSize}
-            tempCanvasWidth={tempCanvasWidth}
-            tempCanvasHeight={tempCanvasHeight}
-            onPatternChange={setPattern}
-            onPixelSizeChange={setPixelSize}
-            onTempCanvasWidthChange={setTempCanvasWidth}
-            onTempCanvasHeightChange={setTempCanvasHeight}
-            onSetCanvasSize={handleSetCanvasSize}
-            onClear={handleClear}
-            onShare={handleShare}
-            onDownload={handleDownload}
-            onSave={handleSave}
-            isSaving={isSaving}
-            onPrint={() => { }}
-          />
-        </div>
-
-        {/* Desktop color section - hidden on mobile */}
-        <div className={styles.desktopColorSection}>
-          <ColorPicker
-            selectedColor={selectedColor}
-            onColorChange={setSelectedColor}
-            onColorSave={handleColorSave}
-            isColorPickerMode={isColorPickerMode}
-            onColorPickerModeToggle={setIsColorPickerMode}
-          />
-          <ColorPalette
-            colors={savedColors}
-            selectedColor={selectedColor}
-            onColorSelect={handleColorSelect}
-            onColorPick={handleColorPick}
-            onColorRemove={(color) => {
-              setSavedColors(savedColors.filter((c) => c !== color))
-            }}
-          />
-        </div>
+        {/* Panel toggle button - positioned outside panel for proper z-index */}
+        <button
+          className={`${styles.panelToggle} ${isPanelCollapsed ? styles.collapsed : ''}`}
+          onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
+          aria-label={isPanelCollapsed ? 'Expand panel' : 'Collapse panel'}
+          title={isPanelCollapsed ? 'Expand panel' : 'Collapse panel'}
+        >
+          {isPanelCollapsed ? (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          )}
+        </button>
       </div>
     </main>
   )
