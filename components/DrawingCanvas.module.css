@@ -18,16 +18,37 @@
   position: relative;
 }
 
+@media (max-width: 767px) {
+  .zoomWrapper {
+    width: fit-content;
+    height: fit-content;
+    min-width: 100%;
+    /* Remove min-height to allow content to be smaller than viewport */
+    padding: 1rem;
+    /* Ensure it can grow beyond viewport and doesn't shrink */
+    flex-shrink: 0;
+    flex-grow: 0;
+    /* Ensure it doesn't constrain height */
+    align-self: flex-start;
+    /* Ensure content can overflow */
+    min-height: auto;
+  }
+
+  .zoomContainer {
+    width: fit-content;
+    height: fit-content;
+    flex-shrink: 0;
+    flex-grow: 0;
+  }
+}
+
 .canvas {
   display: grid;
   background: #f9f9f9;
   border: 2px solid #ddd;
   border-radius: 4px;
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .pixel {
@@ -104,8 +125,13 @@
     background: #f5f5f5;
   }
 
+  .zoomWrapper {
+    padding: 0.5rem;
+    min-width: auto;
+    min-height: auto;
+  }
+
   .zoomContainer {
-    overflow: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible;
   }
 }

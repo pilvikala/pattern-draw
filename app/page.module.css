@@ -110,6 +110,45 @@
   height: 100%;
 }
 
+.scrollableCanvasWrapper {
+  flex: 1;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  min-height: 0;
+}
+
+@media (max-width: 767px) {
+  .canvasContainer {
+    padding: 0;
+    overflow: hidden;
+    min-height: 0;
+    /* Ensure it takes available space in flex */
+    flex: 1 1 0%;
+  }
+
+  .scrollableCanvasWrapper {
+    display: flex;
+    min-height: 0;
+    /* Use flex-basis: 0 to allow proper height calculation in flex */
+    flex: 1 1 0%;
+    /* Ensure scrolling works */
+    overflow-y: auto;
+    overflow-x: auto;
+    /* Explicitly set height to 0 so flex calculates it properly */
+    /* height: 0; */
+  }
+
+  .panelToggle {
+    display: none !important;
+  }
+}
+
 .toolsPanel {
   display: none;
 }
@@ -117,6 +156,7 @@
 .leftSection {
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .desktopControls,
@@ -197,6 +237,15 @@
     min-height: 0;
     position: relative;
     z-index: 0;
+  }
+
+  .scrollableCanvasWrapper {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .toolsPanel {
@@ -285,6 +334,7 @@
 }
 
 @media print {
+
   .header,
   .topBar,
   .toolsPanel {

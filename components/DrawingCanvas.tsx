@@ -34,6 +34,8 @@ export default function DrawingCanvas({
   const isPinchingRef = useRef(false)
   const drawStartTimerRef = useRef<NodeJS.Timeout | null>(null)
   const pendingDrawRef = useRef<{ row: number; col: number } | null>(null)
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null)
+  const isScrollingRef = useRef(false)
 
   const dimensions = { cols: canvasWidth, rows: canvasHeight }
 
@@ -144,9 +146,11 @@ export default function DrawingCanvas({
       return
     }
 
-    e.preventDefault()
-
+    // Store initial touch position to detect scrolling vs drawing
     const touch = e.touches[0]
+    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY }
+    isScrollingRef.current = false
+
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect()
       // Account for zoom when calculating coordinates
@@ -188,18 +192,20 @@ export default function DrawingCanvas({
         if (isColorPickerMode) {
           // Color picker mode - just pick the color immediately
           handlePixelClick(row, col)
+          e.preventDefault()
         } else {
-          // Drawing mode - delay start to detect if second finger is coming
+          // Drawing mode - delay start to detect if second finger is coming or if scrolling
+          // Don't preventDefault immediately - let the scroll container handle scrolling
           pendingDrawRef.current = { row, col }
           drawStartTimerRef.current = setTimeout(() => {
-            // Only start drawing if we're still in single touch mode
-            if (!isPinchingRef.current && pendingDrawRef.current) {
+            // Only start drawing if we're still in single touch mode and not scrolling
+            if (!isPinchingRef.current && !isScrollingRef.current && pendingDrawRef.current) {
               setIsDrawing(true)
               handlePixelClick(pendingDrawRef.current.row, pendingDrawRef.current.col)
               pendingDrawRef.current = null
             }
             drawStartTimerRef.current = null
-          }, 30) // 30ms delay to detect second touch
+          }, 100) // 100ms delay to allow scrolling to start first
         }
       }
     }
@@ -246,9 +252,35 @@ export default function DrawingCanvas({
       return
     }
 
-    // Single touch - drawing mode
-    if (isPinchingRef.current || !isDrawing || isColorPickerMode) return
-    e.preventDefault()
+    // Single touch - detect if scrolling or drawing
+    if (isPinchingRef.current || isColorPickerMode) return
+
+    // Check if this is a scroll gesture (movement > 8px)
+    // With a separate scroll container, we can be more lenient
+    if (touchStartPosRef.current && !isDrawing) {
+      const touch = e.touches[0]
+      const deltaX = Math.abs(touch.clientX - touchStartPosRef.current.x)
+      const deltaY = Math.abs(touch.clientY - touchStartPosRef.current.y)
+      const movement = Math.max(deltaX, deltaY)
+
+      // If movement is significant, it's probably scrolling
+      // Cancel any pending draw since user is scrolling
+      if (movement > 8) {
+        isScrollingRef.current = true
+        if (drawStartTimerRef.current) {
+          clearTimeout(drawStartTimerRef.current)
+          drawStartTimerRef.current = null
+          pendingDrawRef.current = null
+        }
+        // Don't prevent default - let scroll container handle it
+        return
+      }
+    }
+
+    // If we're drawing, prevent default to allow smooth drawing
+    if (isDrawing) {
+      e.preventDefault()
+    }
 
     const touch = e.touches[0]
     if (containerRef.current) {
@@ -309,6 +341,10 @@ export default function DrawingCanvas({
       isPinchingRef.current = false
       pinchStartDistanceRef.current = null
     }
+
+    // Reset touch tracking
+    touchStartPosRef.current = null
+    isScrollingRef.current = false
   }, [])
 
   // Zoom controls
@@ -462,9 +498,8 @@ export default function DrawingCanvas({
             position: 'relative',
             width: pattern === 'bricks' ? `${3 + dimensions.cols * pixelSize + pixelSize / 2}px` : `${3 + dimensions.cols * pixelSize}px`,
             height: pattern === 'bricksVertical' ? `${3 + dimensions.rows * pixelSize + pixelSize / 2}px` : `${3 + dimensions.rows * pixelSize}px`,
-            maxWidth: '100%',
-            maxHeight: '100%',
             margin: 'auto',
+            flexShrink: 0,
           }}
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleMouseUp}
