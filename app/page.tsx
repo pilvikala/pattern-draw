@@ -698,16 +698,18 @@ function HomeContent() {
           </div>
 
           <div className={styles.canvasContainer}>
-            <DrawingCanvas
-              pattern={pattern}
-              pixelSize={pixelSize}
-              canvasWidth={canvasWidth}
-              canvasHeight={canvasHeight}
-              selectedColor={selectedColor}
-              grid={grid}
-              onPixelFill={handlePixelFill}
-              isColorPickerMode={isColorPickerMode}
-            />
+            <div className={styles.scrollableCanvasWrapper}>
+              <DrawingCanvas
+                pattern={pattern}
+                pixelSize={pixelSize}
+                canvasWidth={canvasWidth}
+                canvasHeight={canvasHeight}
+                selectedColor={selectedColor}
+                grid={grid}
+                onPixelFill={handlePixelFill}
+                isColorPickerMode={isColorPickerMode}
+              />
+            </div>
           </div>
         </div>
 
