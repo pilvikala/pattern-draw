@@ -143,6 +143,10 @@
     /* Explicitly set height to 0 so flex calculates it properly */
     /* height: 0; */
   }
+
+  .panelToggle {
+    display: none !important;
+  }
 }
 
 .toolsPanel {
