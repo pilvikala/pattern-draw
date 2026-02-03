@@ -1,3 +1,4 @@
+/* ─── Zoom layout ─────────────────────────────────────────────────────────── */
 .zoomWrapper {
   position: relative;
   width: 100%;
@@ -18,30 +19,7 @@
   position: relative;
 }
 
-@media (max-width: 767px) {
-  .zoomWrapper {
-    width: fit-content;
-    height: fit-content;
-    min-width: 100%;
-    /* Remove min-height to allow content to be smaller than viewport */
-    padding: 1rem;
-    /* Ensure it can grow beyond viewport and doesn't shrink */
-    flex-shrink: 0;
-    flex-grow: 0;
-    /* Ensure it doesn't constrain height */
-    align-self: flex-start;
-    /* Ensure content can overflow */
-    min-height: auto;
-  }
-
-  .zoomContainer {
-    width: fit-content;
-    height: fit-content;
-    flex-shrink: 0;
-    flex-grow: 0;
-  }
-}
-
+/* ─── Canvas ──────────────────────────────────────────────────────────────── */
 .canvas {
   display: grid;
   background: #f9f9f9;
@@ -51,6 +29,7 @@
   flex-shrink: 0;
 }
 
+/* ─── Pixel (and states) ───────────────────────────────────────────────────── */
 .pixel {
   cursor: crosshair;
   transition: opacity 0.1s;
@@ -70,6 +49,7 @@
   opacity: 0.6;
 }
 
+/* ─── Zoom controls UI ────────────────────────────────────────────────────── */
 .zoomControls {
   display: none;
   position: absolute;
@@ -112,26 +92,38 @@
   background: #d0d0d0;
 }
 
+/* ─── Media: desktop (768px+) ───────────────────────────────────────────────── */
 @media (min-width: 768px) {
   .zoomControls {
     display: flex;
   }
 }
 
+/* ─── Media: mobile (≤767px) ────────────────────────────────────────────────── */
 @media (max-width: 767px) {
+  .zoomWrapper {
+    width: fit-content;
+    height: fit-content;
+    min-width: auto;
+    min-height: auto;
+    padding: 0.5rem;
+    flex-shrink: 0;
+    flex-grow: 0;
+    align-self: flex-start;
+    margin: 0 auto;
+  }
+
+  .zoomContainer {
+    width: fit-content;
+    height: fit-content;
+    flex-shrink: 0;
+    flex-grow: 0;
+    overflow: visible;
+  }
+
   .canvas {
     border: none;
     border-radius: 0;
     background: #f5f5f5;
-  }
-
-  .zoomWrapper {
-    padding: 0.5rem;
-    min-width: auto;
-    min-height: auto;
-  }
-
-  .zoomContainer {
-    overflow: visible;
   }
 }
