@@ -483,7 +483,7 @@ export default function DrawingCanvas({
         className={styles.zoomContainer}
         style={{
           transform: `scale(${zoom})`,
-          transformOrigin: 'center center',
+          transformOrigin: 'top center',
         }}
       >
         <div
