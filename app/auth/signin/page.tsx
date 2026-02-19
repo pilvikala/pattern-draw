@@ -1,17 +1,26 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { signIn } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import styles from './auth.module.css'
 
+const SESSION_EXPIRED_MESSAGE = 'Your session expired. Please sign in again to save your drawing.'
+
 export default function SignInPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+
+  useEffect(() => {
+    if (searchParams.get('error') === 'SessionExpired') {
+      setError(SESSION_EXPIRED_MESSAGE)
+    }
+  }, [searchParams])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -28,7 +37,8 @@ export default function SignInPage() {
       if (result?.error) {
         setError(result.error)
       } else {
-        router.push('/')
+        const callbackUrl = searchParams.get('callbackUrl') || '/'
+        router.push(callbackUrl)
         router.refresh()
       }
     } catch (err) {

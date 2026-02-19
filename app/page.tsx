@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
-import { useSession } from 'next-auth/react'
+import { useSession, getSession, signOut } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import DrawingCanvas from '@/components/DrawingCanvas'
 import ColorPicker from '@/components/ColorPicker'
@@ -594,42 +594,52 @@ function HomeContent() {
         grid,
       }
 
-      if (currentDrawingId) {
-        // Update existing drawing
-        const response = await fetch(`/api/drawings/${currentDrawingId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ drawingData }),
-        })
+      const body = JSON.stringify({ drawingData })
+      const headers = { 'Content-Type': 'application/json' as const }
+      const credentials = 'include' as RequestCredentials
 
-        if (response.ok) {
+      let response: Response
+      if (currentDrawingId) {
+        response = await fetch(`/api/drawings/${currentDrawingId}`, {
+          method: 'PUT',
+          headers,
+          body,
+          credentials,
+        })
+      } else {
+        response = await fetch('/api/drawings', {
+          method: 'POST',
+          headers,
+          body,
+          credentials,
+        })
+      }
+
+      if (response.status === 401) {
+        const freshSession = await getSession()
+        if (!freshSession?.user?.id) {
+          await signOut({ redirect: false })
+          router.push('/auth/signin?error=SessionExpired&callbackUrl=' + encodeURIComponent(window.location.pathname + window.location.search))
+          return
+        }
+        throw new Error('Session expired. Please try saving again.')
+      }
+
+      if (response.ok) {
+        if (currentDrawingId) {
           alert('Drawing updated!')
         } else {
-          throw new Error('Failed to update drawing')
-        }
-      } else {
-        // Create new drawing
-        const response = await fetch('/api/drawings', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ drawingData }),
-        })
-
-        if (response.ok) {
           const { drawing } = await response.json()
           setCurrentDrawingId(drawing.id)
           alert('Drawing saved!')
-        } else {
-          throw new Error('Failed to save drawing')
         }
+      } else {
+        throw new Error('Failed to save drawing')
       }
     } catch (error) {
       console.error('Error saving drawing:', error)
-      alert('Failed to save drawing. Please try again.')
+      const message = error instanceof Error ? error.message : 'Failed to save drawing. Please try again.'
+      alert(message)
     } finally {
       setIsSaving(false)
     }

@@ -53,6 +53,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   session: {
     strategy: 'jwt',
+    // Keep session for 30 days; refresh it if older than 1 hour so long drawing sessions stay valid
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+    updateAge: 60 * 60, // 1 hour – session is re-issued when older than this when accessed
   },
   pages: {
     signIn: '/auth/signin',
