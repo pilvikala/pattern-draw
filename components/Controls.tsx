@@ -13,7 +13,7 @@ interface ControlsProps {
   onTempCanvasWidthChange: (width: string) => void
   onTempCanvasHeightChange: (height: string) => void
   onSetCanvasSize: () => void
-  onClear: () => void
+  onNewDrawingRequest: () => void
   onShare: () => void
   onDownload: () => void
   onSave?: () => void
@@ -32,19 +32,13 @@ export default function Controls({
   onTempCanvasWidthChange,
   onTempCanvasHeightChange,
   onSetCanvasSize,
-  onClear,
+  onNewDrawingRequest,
   onShare,
   onDownload,
   onSave,
   isSaving,
   onPrint,
 }: ControlsProps) {
-  const handleClear = () => {
-    if (confirm('Are you sure you want to create a new drawing? This will clear the current canvas.')) {
-      onClear()
-    }
-  }
-
   return (
     <div className={styles.controls}>
       <div className={styles.controlGroup}>
@@ -107,7 +101,7 @@ export default function Controls({
       </div>
 
       <div className={styles.buttonGroup}>
-        <button onClick={handleClear} className={styles.button}>
+        <button onClick={onNewDrawingRequest} className={styles.button}>
           New Drawing
         </button>
         {onSave && (

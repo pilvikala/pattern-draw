@@ -15,7 +15,7 @@ interface MobileMenuProps {
   onTempCanvasWidthChange: (width: string) => void
   onTempCanvasHeightChange: (height: string) => void
   onSetCanvasSize: () => void
-  onClear: () => void
+  onNewDrawingRequest: () => void
   onShare: () => void
   onDownload: () => void
   onSave?: () => void
@@ -34,7 +34,7 @@ export default function MobileMenu({
   onTempCanvasWidthChange,
   onTempCanvasHeightChange,
   onSetCanvasSize,
-  onClear,
+  onNewDrawingRequest,
   onShare,
   onDownload,
   onSave,
@@ -43,11 +43,9 @@ export default function MobileMenu({
 }: MobileMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
 
-  const handleClear = () => {
-    if (confirm('Are you sure you want to create a new drawing? This will clear the current canvas.')) {
-      onClear()
-      setIsOpen(false)
-    }
+  const handleNewDrawing = () => {
+    onNewDrawingRequest()
+    setIsOpen(false)
   }
 
   return (
@@ -147,7 +145,7 @@ export default function MobileMenu({
               </div>
 
               <div className={styles.menuActions}>
-                <button onClick={handleClear} className={styles.menuButton}>
+                <button onClick={handleNewDrawing} className={styles.menuButton}>
                   New Drawing
                 </button>
                 {onSave && (

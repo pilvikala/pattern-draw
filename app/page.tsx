@@ -35,6 +35,7 @@ function HomeContent() {
   const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
+  const [showNewDrawingModal, setShowNewDrawingModal] = useState(false)
 
   // Undo/Redo history
   const [history, setHistory] = useState<{ [key: string]: string }[]>([{}])
@@ -455,6 +456,23 @@ function HomeContent() {
     })
   }
 
+  const handleNewDrawingCopy = () => {
+    setShowNewDrawingModal(false)
+    setCurrentDrawingId(null)
+    if (searchParams.get('id')) {
+      router.replace(window.location.pathname)
+    }
+  }
+
+  const handleNewDrawingRequest = () => {
+    setShowNewDrawingModal(true)
+  }
+
+  const handleNewDrawingBlank = () => {
+    setShowNewDrawingModal(false)
+    handleClear()
+  }
+
   const handleSetCanvasSize = () => {
     const width = parseInt(tempCanvasWidth)
     const height = parseInt(tempCanvasHeight)
@@ -620,6 +638,25 @@ function HomeContent() {
 
   return (
     <main className={styles.main}>
+      {showNewDrawingModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowNewDrawingModal(false)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h3 className={styles.modalTitle}>New drawing</h3>
+            <p className={styles.modalMessage}>Start from a blank canvas or copy the current drawing?</p>
+            <div className={styles.modalActions}>
+              <button onClick={handleNewDrawingBlank} className={styles.modalButton}>
+                Start blank
+              </button>
+              <button onClick={handleNewDrawingCopy} className={styles.modalButton}>
+                Copy current drawing
+              </button>
+            </div>
+            <button onClick={() => setShowNewDrawingModal(false)} className={styles.modalCancel}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       <div className={`${styles.container} ${isPanelCollapsed ? styles.panelCollapsed : ''}`}>
         <div className={styles.leftSection}>
           <div className={styles.header}>
@@ -666,7 +703,7 @@ function HomeContent() {
                 onTempCanvasWidthChange={setTempCanvasWidth}
                 onTempCanvasHeightChange={setTempCanvasHeight}
                 onSetCanvasSize={handleSetCanvasSize}
-                onClear={handleClear}
+                onNewDrawingRequest={handleNewDrawingRequest}
                 onShare={handleShare}
                 onDownload={handleDownload}
                 onSave={handleSave}
@@ -727,7 +764,7 @@ function HomeContent() {
                 onTempCanvasWidthChange={setTempCanvasWidth}
                 onTempCanvasHeightChange={setTempCanvasHeight}
                 onSetCanvasSize={handleSetCanvasSize}
-                onClear={handleClear}
+                onNewDrawingRequest={handleNewDrawingRequest}
                 onShare={handleShare}
                 onDownload={handleDownload}
                 onSave={handleSave}
