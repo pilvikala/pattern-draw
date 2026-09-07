@@ -11,8 +11,8 @@
     "test:watch": "vitest --watch"
   },
   "dependencies": {
-    "@auth/prisma-adapter": "^2.11.1",
-    "@prisma/client": "^6.19.0",
+    "@auth/prisma-adapter": "^2.11.3",
+    "@prisma/client": "^2.26.0",
     "@types/bcryptjs": "^2.4.6",
     "bcryptjs": "^3.0.3",
     "next": "^16.0.0",
