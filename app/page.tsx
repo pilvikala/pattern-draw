@@ -476,15 +476,41 @@ function HomeContent() {
   const handleSetCanvasSize = () => {
     const width = parseInt(tempCanvasWidth)
     const height = parseInt(tempCanvasHeight)
-    if (!isNaN(width) && width >= 2 && width <= 500) {
-      setCanvasWidth(width)
+    const widthValid = !isNaN(width) && width >= 2 && width <= 500
+    const heightValid = !isNaN(height) && height >= 2 && height <= 500
+    const newWidth = widthValid ? width : canvasWidth
+    const newHeight = heightValid ? height : canvasHeight
+
+    if (widthValid) {
+      setCanvasWidth(newWidth)
     } else {
       setTempCanvasWidth(canvasWidth.toString())
     }
-    if (!isNaN(height) && height >= 2 && height <= 500) {
-      setCanvasHeight(height)
+    if (heightValid) {
+      setCanvasHeight(newHeight)
     } else {
       setTempCanvasHeight(canvasHeight.toString())
+    }
+
+    if (newWidth !== canvasWidth || newHeight !== canvasHeight) {
+      // Shift existing pixels so the drawing stays centered instead of
+      // new rows/columns only being added on the right/bottom.
+      const colOffset = Math.floor((newWidth - canvasWidth) / 2)
+      const rowOffset = Math.floor((newHeight - canvasHeight) / 2)
+
+      const shiftedGrid: { [key: string]: string } = {}
+      for (const key in grid) {
+        const [rowStr, colStr] = key.split(',')
+        const newRow = parseInt(rowStr, 10) + rowOffset
+        const newCol = parseInt(colStr, 10) + colOffset
+        if (newRow >= 0 && newRow < newHeight && newCol >= 0 && newCol < newWidth) {
+          shiftedGrid[`${newRow},${newCol}`] = grid[key]
+        }
+      }
+
+      setGrid(shiftedGrid)
+      gridRef.current = shiftedGrid
+      saveToHistoryImmediate()
     }
   }
 
