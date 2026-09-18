@@ -10,7 +10,8 @@ import ColorPalette from '@/components/ColorPalette'
 import Controls from '@/components/Controls'
 import MobileMenu from '@/components/MobileMenu'
 import { encodeDrawing, decodeDrawing, serializeDrawing } from '@/lib/serialization'
-import type { DrawingData, MatrixPattern } from '@/lib/types'
+import { floodFillGrid } from '@/lib/floodFill'
+import type { DrawingData, MatrixPattern, Tool } from '@/lib/types'
 import UserMenu from '@/components/UserMenu'
 import styles from './page.module.css'
 
@@ -31,7 +32,10 @@ function HomeContent() {
   const [tempCanvasHeight, setTempCanvasHeight] = useState('20')
   const [grid, setGrid] = useState<{ [key: string]: string }>({})
   const gridRef = useRef<{ [key: string]: string }>({})
-  const [isColorPickerMode, setIsColorPickerMode] = useState(false)
+  const [tool, setTool] = useState<Tool>('draw')
+  // Tool to restore once the color picker has been used - the picker is
+  // momentary, unlike fill/draw which stay selected until changed.
+  const previousToolRef = useRef<Tool>('draw')
   const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
@@ -342,13 +346,45 @@ function HomeContent() {
     handleColorSave(color)
   }
 
+  const handleColorPickerModeToggle = (enabled: boolean) => {
+    if (enabled) {
+      if (tool !== 'colorPicker') {
+        previousToolRef.current = tool
+      }
+      setTool('colorPicker')
+    } else {
+      setTool(previousToolRef.current)
+    }
+  }
+
+  const handleFillModeToggle = (enabled: boolean) => {
+    setTool(enabled ? 'fill' : 'draw')
+  }
+
   const handlePixelFill = (key: string, color: string) => {
-    if (isColorPickerMode) {
-      // Pick color from pixel
+    if (tool === 'colorPicker') {
+      // Pick color from pixel, then return to whichever tool was active before
       const pixelColor = grid[key] || '#ffffff'
       setSelectedColor(pixelColor)
       handleColorSave(pixelColor)
-      setIsColorPickerMode(false)
+      setTool(previousToolRef.current)
+    } else if (tool === 'fill') {
+      const [rowStr, colStr] = key.split(',')
+      const row = parseInt(rowStr, 10)
+      const col = parseInt(colStr, 10)
+      const targetColor = grid[key] || '#ffffff'
+      if (targetColor === color) return
+
+      setGrid((prev) => {
+        const newGrid = floodFillGrid(prev, row, col, targetColor, color, canvasWidth, canvasHeight)
+        gridRef.current = newGrid
+
+        if (!isUndoRedoRef.current) {
+          saveToHistory()
+        }
+
+        return newGrid
+      })
     } else {
       // Fill pixel with color
       setGrid((prev) => {
@@ -755,8 +791,10 @@ function HomeContent() {
                 selectedColor={selectedColor}
                 onColorChange={setSelectedColor}
                 onColorSave={handleColorSave}
-                isColorPickerMode={isColorPickerMode}
-                onColorPickerModeToggle={setIsColorPickerMode}
+                isColorPickerMode={tool === 'colorPicker'}
+                onColorPickerModeToggle={handleColorPickerModeToggle}
+                isFillMode={tool === 'fill'}
+                onFillModeToggle={handleFillModeToggle}
               />
               <ColorPalette
                 colors={savedColors}
@@ -780,7 +818,7 @@ function HomeContent() {
                 selectedColor={selectedColor}
                 grid={grid}
                 onPixelFill={handlePixelFill}
-                isColorPickerMode={isColorPickerMode}
+                tool={tool}
               />
             </div>
           </div>
@@ -813,8 +851,10 @@ function HomeContent() {
                 selectedColor={selectedColor}
                 onColorChange={setSelectedColor}
                 onColorSave={handleColorSave}
-                isColorPickerMode={isColorPickerMode}
-                onColorPickerModeToggle={setIsColorPickerMode}
+                isColorPickerMode={tool === 'colorPicker'}
+                onColorPickerModeToggle={handleColorPickerModeToggle}
+                isFillMode={tool === 'fill'}
+                onFillModeToggle={handleFillModeToggle}
               />
               <ColorPalette
                 colors={savedColors}

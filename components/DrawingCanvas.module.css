@@ -41,6 +41,10 @@
   cursor: grab;
 }
 
+.canvas.fillMode .pixel {
+  cursor: cell;
+}
+
 .pixel:hover {
   opacity: 0.8;
 }

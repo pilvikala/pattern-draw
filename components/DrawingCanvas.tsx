@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import type { MatrixPattern } from '@/lib/types'
+import type { MatrixPattern, Tool } from '@/lib/types'
 import styles from './DrawingCanvas.module.css'
 
 interface DrawingCanvasProps {
@@ -12,7 +12,7 @@ interface DrawingCanvasProps {
   selectedColor: string
   grid: { [key: string]: string }
   onPixelFill: (key: string, color: string) => void
-  isColorPickerMode: boolean
+  tool: Tool
 }
 
 export default function DrawingCanvas({
@@ -23,8 +23,13 @@ export default function DrawingCanvas({
   selectedColor,
   grid,
   onPixelFill,
-  isColorPickerMode,
+  tool,
 }: DrawingCanvasProps) {
+  const isColorPickerMode = tool === 'colorPicker'
+  const isFillMode = tool === 'fill'
+  // Both fill and color-picker act on a single click rather than drag-painting.
+  const isSingleClickMode = isColorPickerMode || isFillMode
+
   const [isDrawing, setIsDrawing] = useState(false)
   const [zoom, setZoom] = useState(1.0)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -55,7 +60,7 @@ export default function DrawingCanvas({
 
   const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
     e.preventDefault()
-    if (isColorPickerMode) {
+    if (isSingleClickMode) {
       handlePixelClick(row, col)
       return
     }
@@ -64,7 +69,7 @@ export default function DrawingCanvas({
   }
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawing || !containerRef.current || isColorPickerMode) return
+    if (!isDrawing || !containerRef.current || isSingleClickMode) return
 
     const rect = containerRef.current.getBoundingClientRect()
     // Account for zoom when calculating coordinates
@@ -189,8 +194,8 @@ export default function DrawingCanvas({
       }
 
       if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
-        if (isColorPickerMode) {
-          // Color picker mode - just pick the color immediately
+        if (isSingleClickMode) {
+          // Color picker / fill mode - act immediately on a single tap
           handlePixelClick(row, col)
           e.preventDefault()
         } else {
@@ -209,7 +214,7 @@ export default function DrawingCanvas({
         }
       }
     }
-  }, [isColorPickerMode, pattern, pixelSize, dimensions, handlePixelClick, zoom])
+  }, [isSingleClickMode, pattern, pixelSize, dimensions, handlePixelClick, zoom])
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     // Handle pinch gesture
@@ -253,7 +258,7 @@ export default function DrawingCanvas({
     }
 
     // Single touch - detect if scrolling or drawing
-    if (isPinchingRef.current || isColorPickerMode) return
+    if (isPinchingRef.current || isSingleClickMode) return
 
     // Check if this is a scroll gesture (movement > 8px)
     // With a separate scroll container, we can be more lenient
@@ -324,7 +329,7 @@ export default function DrawingCanvas({
         handlePixelClick(row, col)
       }
     }
-  }, [isDrawing, isColorPickerMode, pattern, pixelSize, dimensions, handlePixelClick, zoom])
+  }, [isDrawing, isSingleClickMode, pattern, pixelSize, dimensions, handlePixelClick, zoom])
 
   const handleTouchEnd = useCallback(() => {
     setIsDrawing(false)
@@ -488,7 +493,7 @@ export default function DrawingCanvas({
       >
         <div
           ref={containerRef}
-          className={`${styles.canvas} ${isColorPickerMode ? styles.colorPickerMode : ''}`}
+          className={`${styles.canvas} ${isColorPickerMode ? styles.colorPickerMode : ''} ${isFillMode ? styles.fillMode : ''}`}
           style={{
             display: 'grid',
             gridTemplateColumns: `repeat(${dimensions.cols}, ${pixelSize}px)`,

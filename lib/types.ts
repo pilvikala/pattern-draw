@@ -1,5 +1,7 @@
 export type MatrixPattern = 'squares' | 'bricks' | 'bricksVertical'
 
+export type Tool = 'draw' | 'fill' | 'colorPicker'
+
 export interface DrawingData {
   pattern: MatrixPattern
   pixelSize: number

@@ -1,5 +1,6 @@
 'use client'
 
+import { FillIcon } from './icons'
 import styles from './CompactColorPicker.module.css'
 
 interface CompactColorPickerProps {
@@ -8,6 +9,8 @@ interface CompactColorPickerProps {
   onColorSave: (color: string) => void
   isColorPickerMode: boolean
   onColorPickerModeToggle: (enabled: boolean) => void
+  isFillMode: boolean
+  onFillModeToggle: (enabled: boolean) => void
 }
 
 export default function CompactColorPicker({
@@ -16,6 +19,8 @@ export default function CompactColorPicker({
   onColorSave,
   isColorPickerMode,
   onColorPickerModeToggle,
+  isFillMode,
+  onFillModeToggle,
 }: CompactColorPickerProps) {
   const handleSave = () => {
     onColorSave(selectedColor)
@@ -46,11 +51,22 @@ export default function CompactColorPicker({
         +
       </button>
       <button
+        onClick={() => onFillModeToggle(!isFillMode)}
+        className={`${styles.pickerButton} ${
+          isFillMode ? styles.active : ''
+        }`}
+        title="Fill tool"
+        aria-pressed={isFillMode}
+      >
+        <FillIcon className={styles.pickerIcon} />
+      </button>
+      <button
         onClick={() => onColorPickerModeToggle(!isColorPickerMode)}
         className={`${styles.pickerButton} ${
           isColorPickerMode ? styles.active : ''
         }`}
         title="Pick color from canvas"
+        aria-pressed={isColorPickerMode}
       >
         <img
           src="/color-picker.png"
