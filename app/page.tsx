@@ -11,7 +11,8 @@ import Controls from '@/components/Controls'
 import MobileMenu from '@/components/MobileMenu'
 import { encodeDrawing, decodeDrawing, serializeDrawing } from '@/lib/serialization'
 import { floodFillGrid } from '@/lib/floodFill'
-import type { DrawingData, MatrixPattern, Tool } from '@/lib/types'
+import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
+import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData } from '@/lib/types'
 import UserMenu from '@/components/UserMenu'
 import styles from './page.module.css'
 
@@ -36,6 +37,8 @@ function HomeContent() {
   // Tool to restore once the color picker has been used - the picker is
   // momentary, unlike fill/draw which stay selected until changed.
   const previousToolRef = useRef<Tool>('draw')
+  const [selection, setSelection] = useState<SelectionRect | null>(null)
+  const [clipboard, setClipboard] = useState<ClipboardData | null>(null)
   const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
@@ -183,6 +186,8 @@ function HomeContent() {
         const initialGrid = data.grid || {}
         setGrid(initialGrid)
         gridRef.current = initialGrid
+        setSelection(null)
+        setClipboard(null)
         // Initialize history with loaded grid
         const initialHistory = [initialGrid]
         setHistory(initialHistory)
@@ -218,6 +223,8 @@ function HomeContent() {
               const initialGrid = data.grid || {}
               setGrid(initialGrid)
               gridRef.current = initialGrid
+              setSelection(null)
+              setClipboard(null)
               // Initialize history with loaded grid
               const initialHistory = [initialGrid]
               setHistory(initialHistory)
@@ -257,6 +264,8 @@ function HomeContent() {
               const initialGrid = drawingData.grid || {}
               setGrid(initialGrid)
               gridRef.current = initialGrid
+              setSelection(null)
+              setClipboard(null)
               // Initialize history with loaded grid
               const initialHistory = [initialGrid]
               setHistory(initialHistory)
@@ -357,9 +366,140 @@ function HomeContent() {
     }
   }
 
+  const handleDrawModeSelect = () => {
+    setTool('draw')
+  }
+
   const handleFillModeToggle = (enabled: boolean) => {
     setTool(enabled ? 'fill' : 'draw')
   }
+
+  const handleSelectModeToggle = (enabled: boolean) => {
+    setTool(enabled ? 'select' : 'draw')
+  }
+
+  const handleSelectionChange = useCallback((rect: SelectionRect | null) => {
+    setSelection(rect)
+  }, [])
+
+  const handleSelectionMoveEnd = useCallback((deltaRow: number, deltaCol: number) => {
+    if (!selection) return
+    const newRect: SelectionRect = {
+      startRow: selection.startRow + deltaRow,
+      startCol: selection.startCol + deltaCol,
+      endRow: selection.endRow + deltaRow,
+      endCol: selection.endCol + deltaCol,
+    }
+    // Derive the new grid from setGrid's own `prev` (not gridRef.current) so this
+    // stays correct if React invokes the updater more than once (e.g. Strict Mode).
+    setGrid((prev) => {
+      const clip = copySelectionCells(prev, selection)
+      let newGrid = clearRectFromGrid(prev, selection)
+      newGrid = pasteClipboardToGrid(newGrid, clip, newRect.startRow, newRect.startCol, canvasWidth, canvasHeight)
+      gridRef.current = newGrid
+      saveToHistoryImmediate()
+      return newGrid
+    })
+    setSelection(newRect)
+  }, [selection, canvasWidth, canvasHeight, saveToHistoryImmediate])
+
+  const handleCopy = useCallback(() => {
+    if (!selection) return
+    setClipboard(copySelectionCells(gridRef.current, selection))
+  }, [selection])
+
+  const handleCut = useCallback(() => {
+    if (!selection) return
+    setClipboard(copySelectionCells(gridRef.current, selection))
+    const newGrid = clearRectFromGrid(gridRef.current, selection)
+    gridRef.current = newGrid
+    setGrid(newGrid)
+    saveToHistoryImmediate()
+  }, [selection, saveToHistoryImmediate])
+
+  const handlePaste = useCallback(() => {
+    if (!clipboard) return
+    const targetRow = selection ? selection.startRow : 0
+    const targetCol = selection ? selection.startCol : 0
+    const newGrid = pasteClipboardToGrid(gridRef.current, clipboard, targetRow, targetCol, canvasWidth, canvasHeight)
+    gridRef.current = newGrid
+    setGrid(newGrid)
+    saveToHistoryImmediate()
+    setTool('select')
+    setSelection({
+      startRow: targetRow,
+      startCol: targetCol,
+      endRow: Math.min(targetRow + clipboard.height - 1, canvasHeight - 1),
+      endCol: Math.min(targetCol + clipboard.width - 1, canvasWidth - 1),
+    })
+  }, [clipboard, selection, canvasWidth, canvasHeight, saveToHistoryImmediate])
+
+  const handleDeleteSelection = useCallback(() => {
+    if (!selection) return
+    const newGrid = clearRectFromGrid(gridRef.current, selection)
+    gridRef.current = newGrid
+    setGrid(newGrid)
+    saveToHistoryImmediate()
+  }, [selection, saveToHistoryImmediate])
+
+  const handleDeselect = useCallback(() => {
+    setSelection(null)
+  }, [])
+
+  // Keyboard shortcuts: tool switching (P/F/C/S) and select-tool actions
+  // (copy/cut/paste/delete/deselect). Ignored while typing in a text input
+  // so hex-color and canvas-size fields keep working.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const isEditable = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      if (isEditable) return
+
+      const isMeta = e.metaKey || e.ctrlKey
+      const noModifiers = !e.metaKey && !e.ctrlKey && !e.altKey
+      const key = e.key.toLowerCase()
+
+      if (isMeta && key === 'c') {
+        if (tool === 'select' && selection) {
+          e.preventDefault()
+          handleCopy()
+        }
+      } else if (isMeta && key === 'x') {
+        if (tool === 'select' && selection) {
+          e.preventDefault()
+          handleCut()
+        }
+      } else if (isMeta && key === 'v') {
+        if (clipboard) {
+          e.preventDefault()
+          handlePaste()
+        }
+      } else if (e.key === 'Escape') {
+        if (selection) {
+          e.preventDefault()
+          handleDeselect()
+        }
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && tool === 'select' && selection) {
+        e.preventDefault()
+        handleDeleteSelection()
+      } else if (noModifiers && key === 'p') {
+        e.preventDefault()
+        handleDrawModeSelect()
+      } else if (noModifiers && key === 'f') {
+        e.preventDefault()
+        handleFillModeToggle(tool !== 'fill')
+      } else if (noModifiers && key === 'c') {
+        e.preventDefault()
+        handleColorPickerModeToggle(tool !== 'colorPicker')
+      } else if (noModifiers && key === 's') {
+        e.preventDefault()
+        handleSelectModeToggle(tool !== 'select')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [tool, selection, clipboard, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
 
   const handlePixelFill = (key: string, color: string) => {
     if (tool === 'colorPicker') {
@@ -418,6 +558,7 @@ function HomeContent() {
         setGrid(newGrid)
         gridRef.current = newGrid
         lastSavedGridRef.current = newGrid
+        setSelection(null)
         // Reset flag after state update
         setTimeout(() => {
           isUndoRedoRef.current = false
@@ -443,6 +584,7 @@ function HomeContent() {
         setGrid(newGrid)
         gridRef.current = newGrid
         lastSavedGridRef.current = newGrid
+        setSelection(null)
         // Reset flag after state update
         setTimeout(() => {
           isUndoRedoRef.current = false
@@ -461,6 +603,8 @@ function HomeContent() {
     const emptyGrid = {}
     setGrid(emptyGrid)
     gridRef.current = emptyGrid
+    setSelection(null)
+    setClipboard(null)
     // Reset currentDrawingId so future saves create a new drawing instead of updating
     setCurrentDrawingId(null)
     // Clear the URL parameter if present
@@ -546,6 +690,7 @@ function HomeContent() {
 
       setGrid(shiftedGrid)
       gridRef.current = shiftedGrid
+      setSelection(null)
       saveToHistoryImmediate()
     }
   }
@@ -791,10 +936,19 @@ function HomeContent() {
                 selectedColor={selectedColor}
                 onColorChange={setSelectedColor}
                 onColorSave={handleColorSave}
+                isDrawMode={tool === 'draw'}
+                onDrawModeSelect={handleDrawModeSelect}
                 isColorPickerMode={tool === 'colorPicker'}
                 onColorPickerModeToggle={handleColorPickerModeToggle}
                 isFillMode={tool === 'fill'}
                 onFillModeToggle={handleFillModeToggle}
+                isSelectMode={tool === 'select'}
+                onSelectModeToggle={handleSelectModeToggle}
+                canCopy={tool === 'select' && !!selection}
+                canPaste={!!clipboard}
+                onCopy={handleCopy}
+                onCut={handleCut}
+                onPaste={handlePaste}
               />
               <ColorPalette
                 colors={savedColors}
@@ -819,6 +973,9 @@ function HomeContent() {
                 grid={grid}
                 onPixelFill={handlePixelFill}
                 tool={tool}
+                selection={selection}
+                onSelectionChange={handleSelectionChange}
+                onSelectionMoveEnd={handleSelectionMoveEnd}
               />
             </div>
           </div>
@@ -851,10 +1008,19 @@ function HomeContent() {
                 selectedColor={selectedColor}
                 onColorChange={setSelectedColor}
                 onColorSave={handleColorSave}
+                isDrawMode={tool === 'draw'}
+                onDrawModeSelect={handleDrawModeSelect}
                 isColorPickerMode={tool === 'colorPicker'}
                 onColorPickerModeToggle={handleColorPickerModeToggle}
                 isFillMode={tool === 'fill'}
                 onFillModeToggle={handleFillModeToggle}
+                isSelectMode={tool === 'select'}
+                onSelectModeToggle={handleSelectModeToggle}
+                canCopy={tool === 'select' && !!selection}
+                canPaste={!!clipboard}
+                onCopy={handleCopy}
+                onCut={handleCut}
+                onPaste={handlePaste}
               />
               <ColorPalette
                 colors={savedColors}

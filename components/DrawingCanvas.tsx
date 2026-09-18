@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import type { MatrixPattern, Tool } from '@/lib/types'
+import type { MatrixPattern, Tool, SelectionRect } from '@/lib/types'
+import { normalizeRect } from '@/lib/selection'
 import styles from './DrawingCanvas.module.css'
 
 interface DrawingCanvasProps {
@@ -13,6 +14,9 @@ interface DrawingCanvasProps {
   grid: { [key: string]: string }
   onPixelFill: (key: string, color: string) => void
   tool: Tool
+  selection: SelectionRect | null
+  onSelectionChange: (rect: SelectionRect | null) => void
+  onSelectionMoveEnd: (deltaRow: number, deltaCol: number) => void
 }
 
 export default function DrawingCanvas({
@@ -24,13 +28,24 @@ export default function DrawingCanvas({
   grid,
   onPixelFill,
   tool,
+  selection,
+  onSelectionChange,
+  onSelectionMoveEnd,
 }: DrawingCanvasProps) {
   const isColorPickerMode = tool === 'colorPicker'
   const isFillMode = tool === 'fill'
-  // Both fill and color-picker act on a single click rather than drag-painting.
+  const isSelectMode = tool === 'select'
+  // Fill and color-picker act on a single click rather than drag-painting;
+  // select uses its own drag semantics (marquee / move), handled separately.
   const isSingleClickMode = isColorPickerMode || isFillMode
 
   const [isDrawing, setIsDrawing] = useState(false)
+  const [isSelecting, setIsSelecting] = useState(false)
+  const selectStartRef = useRef<{ row: number; col: number } | null>(null)
+  const [isMovingSelection, setIsMovingSelection] = useState(false)
+  const moveStartRef = useRef<{ row: number; col: number } | null>(null)
+  const [moveDelta, setMoveDelta] = useState({ dRow: 0, dCol: 0 })
+  const movingSnapshotRef = useRef<string[][] | null>(null)
   const [zoom, setZoom] = useState(1.0)
   const containerRef = useRef<HTMLDivElement>(null)
   const zoomContainerRef = useRef<HTMLDivElement>(null)
@@ -53,35 +68,32 @@ export default function DrawingCanvas({
     return grid[key] || '#ffffff'
   }
 
+  const isInsideSelection = (row: number, col: number): boolean => {
+    if (!selection) return false
+    return (
+      row >= selection.startRow &&
+      row <= selection.endRow &&
+      col >= selection.startCol &&
+      col <= selection.endCol
+    )
+  }
+
   const handlePixelClick = useCallback((row: number, col: number) => {
     const key = getPixelKey(row, col)
     onPixelFill(key, selectedColor)
   }, [onPixelFill, selectedColor])
 
-  const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
-    e.preventDefault()
-    if (isSingleClickMode) {
-      handlePixelClick(row, col)
-      return
-    }
-    setIsDrawing(true)
-    handlePixelClick(row, col)
-  }
-
-  const handleCanvasMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawing || !containerRef.current || isSingleClickMode) return
-
+  // Shared pattern-aware coordinate math used by select-mode dragging.
+  const getCellFromPoint = useCallback((clientX: number, clientY: number): { row: number; col: number } | null => {
+    if (!containerRef.current) return null
     const rect = containerRef.current.getBoundingClientRect()
-    // Account for zoom when calculating coordinates
-    // getBoundingClientRect() returns transformed coordinates, so we divide by zoom
-    const x = (e.clientX - rect.left) / zoom
-    const y = (e.clientY - rect.top) / zoom
+    const x = (clientX - rect.left) / zoom
+    const y = (clientY - rect.top) / zoom
 
     let row: number
     let col: number
 
     if (pattern === 'bricks') {
-      // Horizontal offset: odd rows are offset horizontally
       row = Math.floor(y / pixelSize)
       if (row % 2 === 1) {
         const adjustedX = x - pixelSize / 2
@@ -92,7 +104,6 @@ export default function DrawingCanvas({
         col = Math.floor(x / pixelSize)
       }
     } else if (pattern === 'bricksVertical') {
-      // Vertical offset: odd columns are offset vertically
       col = Math.floor(x / pixelSize)
       if (col % 2 === 1) {
         const adjustedY = y - pixelSize / 2
@@ -103,21 +114,98 @@ export default function DrawingCanvas({
         row = Math.floor(y / pixelSize)
       }
     } else {
-      // Regular squares
       col = Math.floor(x / pixelSize)
       row = Math.floor(y / pixelSize)
     }
 
-    if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
+    if (col < 0 || col >= dimensions.cols || row < 0 || row >= dimensions.rows) return null
+    return { row, col }
+  }, [pattern, pixelSize, dimensions, zoom])
+
+  const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
+    e.preventDefault()
+    if (isSelectMode) {
+      if (selection && isInsideSelection(row, col)) {
+        const snapshot: string[][] = []
+        for (let r = selection.startRow; r <= selection.endRow; r++) {
+          const rowColors: string[] = []
+          for (let c = selection.startCol; c <= selection.endCol; c++) {
+            rowColors.push(getPixelColor(r, c))
+          }
+          snapshot.push(rowColors)
+        }
+        movingSnapshotRef.current = snapshot
+        moveStartRef.current = { row, col }
+        setMoveDelta({ dRow: 0, dCol: 0 })
+        setIsMovingSelection(true)
+      } else {
+        selectStartRef.current = { row, col }
+        setIsSelecting(true)
+        onSelectionChange(normalizeRect(row, col, row, col))
+      }
+      return
+    }
+    if (isSingleClickMode) {
       handlePixelClick(row, col)
+      return
+    }
+    setIsDrawing(true)
+    handlePixelClick(row, col)
+  }
+
+  const handleCanvasMouseMove = (e: React.MouseEvent) => {
+    if (isSelectMode) {
+      if (!isSelecting && !isMovingSelection) return
+      const cell = getCellFromPoint(e.clientX, e.clientY)
+      if (!cell) return
+
+      if (isSelecting && selectStartRef.current) {
+        onSelectionChange(normalizeRect(selectStartRef.current.row, selectStartRef.current.col, cell.row, cell.col))
+      } else if (isMovingSelection && moveStartRef.current && selection) {
+        const rawDRow = cell.row - moveStartRef.current.row
+        const rawDCol = cell.col - moveStartRef.current.col
+        const dRow = Math.max(-selection.startRow, Math.min(dimensions.rows - 1 - selection.endRow, rawDRow))
+        const dCol = Math.max(-selection.startCol, Math.min(dimensions.cols - 1 - selection.endCol, rawDCol))
+        setMoveDelta({ dRow, dCol })
+      }
+      return
+    }
+
+    if (!isDrawing || !containerRef.current || isSingleClickMode) return
+
+    const cell = getCellFromPoint(e.clientX, e.clientY)
+    if (cell) {
+      handlePixelClick(cell.row, cell.col)
     }
   }
 
+  const finishSelectInteraction = () => {
+    if (isMovingSelection) {
+      if (moveDelta.dRow !== 0 || moveDelta.dCol !== 0) {
+        onSelectionMoveEnd(moveDelta.dRow, moveDelta.dCol)
+      }
+      setIsMovingSelection(false)
+      moveStartRef.current = null
+      movingSnapshotRef.current = null
+      setMoveDelta({ dRow: 0, dCol: 0 })
+    }
+    setIsSelecting(false)
+    selectStartRef.current = null
+  }
+
   const handleMouseUp = () => {
+    if (isSelectMode) {
+      finishSelectInteraction()
+      return
+    }
     setIsDrawing(false)
   }
 
   const handleMouseLeave = () => {
+    if (isSelectMode) {
+      finishSelectInteraction()
+      return
+    }
     setIsDrawing(false)
   }
 
@@ -155,6 +243,32 @@ export default function DrawingCanvas({
     const touch = e.touches[0]
     touchStartPosRef.current = { x: touch.clientX, y: touch.clientY }
     isScrollingRef.current = false
+
+    if (isSelectMode) {
+      const cell = getCellFromPoint(touch.clientX, touch.clientY)
+      if (cell) {
+        e.preventDefault()
+        if (selection && isInsideSelection(cell.row, cell.col)) {
+          const snapshot: string[][] = []
+          for (let r = selection.startRow; r <= selection.endRow; r++) {
+            const rowColors: string[] = []
+            for (let c = selection.startCol; c <= selection.endCol; c++) {
+              rowColors.push(getPixelColor(r, c))
+            }
+            snapshot.push(rowColors)
+          }
+          movingSnapshotRef.current = snapshot
+          moveStartRef.current = cell
+          setMoveDelta({ dRow: 0, dCol: 0 })
+          setIsMovingSelection(true)
+        } else {
+          selectStartRef.current = cell
+          setIsSelecting(true)
+          onSelectionChange(normalizeRect(cell.row, cell.col, cell.row, cell.col))
+        }
+      }
+      return
+    }
 
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect()
@@ -214,7 +328,7 @@ export default function DrawingCanvas({
         }
       }
     }
-  }, [isSingleClickMode, pattern, pixelSize, dimensions, handlePixelClick, zoom])
+  }, [isSingleClickMode, isSelectMode, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange, grid])
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     // Handle pinch gesture
@@ -254,6 +368,25 @@ export default function DrawingCanvas({
       const scale = currentDistance / pinchStartDistanceRef.current
       const newZoom = Math.max(0.5, Math.min(3.0, pinchStartZoomRef.current * scale))
       setZoom(newZoom)
+      return
+    }
+
+    if (isSelectMode) {
+      if (!isSelecting && !isMovingSelection) return
+      const touch = e.touches[0]
+      const cell = getCellFromPoint(touch.clientX, touch.clientY)
+      if (!cell) return
+      e.preventDefault()
+
+      if (isSelecting && selectStartRef.current) {
+        onSelectionChange(normalizeRect(selectStartRef.current.row, selectStartRef.current.col, cell.row, cell.col))
+      } else if (isMovingSelection && moveStartRef.current && selection) {
+        const rawDRow = cell.row - moveStartRef.current.row
+        const rawDCol = cell.col - moveStartRef.current.col
+        const dRow = Math.max(-selection.startRow, Math.min(dimensions.rows - 1 - selection.endRow, rawDRow))
+        const dCol = Math.max(-selection.startCol, Math.min(dimensions.cols - 1 - selection.endCol, rawDCol))
+        setMoveDelta({ dRow, dCol })
+      }
       return
     }
 
@@ -329,9 +462,12 @@ export default function DrawingCanvas({
         handlePixelClick(row, col)
       }
     }
-  }, [isDrawing, isSingleClickMode, pattern, pixelSize, dimensions, handlePixelClick, zoom])
+  }, [isDrawing, isSingleClickMode, isSelectMode, isSelecting, isMovingSelection, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange])
 
   const handleTouchEnd = useCallback(() => {
+    if (isSelectMode) {
+      finishSelectInteraction()
+    }
     setIsDrawing(false)
 
     // Cancel any pending draw
@@ -350,7 +486,7 @@ export default function DrawingCanvas({
     // Reset touch tracking
     touchStartPosRef.current = null
     isScrollingRef.current = false
-  }, [])
+  }, [isSelectMode, isMovingSelection, moveDelta, onSelectionMoveEnd])
 
   // Zoom controls
   const handleZoomIn = useCallback(() => {
@@ -493,7 +629,7 @@ export default function DrawingCanvas({
       >
         <div
           ref={containerRef}
-          className={`${styles.canvas} ${isColorPickerMode ? styles.colorPickerMode : ''} ${isFillMode ? styles.fillMode : ''}`}
+          className={`${styles.canvas} ${isColorPickerMode ? styles.colorPickerMode : ''} ${isFillMode ? styles.fillMode : ''} ${isSelectMode ? styles.selectMode : ''}`}
           style={{
             display: 'grid',
             gridTemplateColumns: `repeat(${dimensions.cols}, ${pixelSize}px)`,
@@ -520,6 +656,54 @@ export default function DrawingCanvas({
                 return renderSquare(row, col)
               }
             })
+          )}
+
+          {isSelectMode && selection && !isMovingSelection && (
+            <div
+              className={styles.selectionMarquee}
+              style={{
+                left: `${selection.startCol * pixelSize}px`,
+                top: `${selection.startRow * pixelSize}px`,
+                width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
+                height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
+              }}
+            />
+          )}
+
+          {isSelectMode && selection && isMovingSelection && movingSnapshotRef.current && (
+            <>
+              <div
+                className={styles.selectionHole}
+                style={{
+                  left: `${selection.startCol * pixelSize}px`,
+                  top: `${selection.startRow * pixelSize}px`,
+                  width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
+                  height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
+                }}
+              />
+              <div
+                className={styles.selectionFloating}
+                style={{
+                  left: `${(selection.startCol + moveDelta.dCol) * pixelSize}px`,
+                  top: `${(selection.startRow + moveDelta.dRow) * pixelSize}px`,
+                  width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
+                  height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${selection.endCol - selection.startCol + 1}, ${pixelSize}px)`,
+                  gridTemplateRows: `repeat(${selection.endRow - selection.startRow + 1}, ${pixelSize}px)`,
+                }}
+              >
+                {movingSnapshotRef.current.map((rowColors, r) =>
+                  rowColors.map((color, c) => (
+                    <div
+                      key={`${r},${c}`}
+                      className={styles.selectionFloatingCell}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>

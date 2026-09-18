@@ -77,6 +77,16 @@
   animation: pulse 1s infinite;
 }
 
+.toolButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolButton:disabled:hover {
+  background: white;
+  border-color: #ddd;
+}
+
 .toolIcon {
   width: 20px;
   height: 20px;

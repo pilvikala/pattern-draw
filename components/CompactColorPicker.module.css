@@ -54,6 +54,16 @@
   animation: pulse 1s infinite;
 }
 
+.pickerButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pickerButton:disabled:hover {
+  background: white;
+  border-color: #ddd;
+}
+
 .pickerIcon {
   width: 20px;
   height: 20px;
