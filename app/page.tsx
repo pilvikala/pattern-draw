@@ -19,6 +19,17 @@ import styles from './page.module.css'
 // Re-export types for backward compatibility
 export type { MatrixPattern, DrawingData } from '@/lib/types'
 
+// Bounds the undo stack's total memory footprint (roughly this many grid
+// cells summed across all retained snapshots) instead of a flat entry count.
+// A flat cap of 50 doesn't scale down for large canvases - 50 full snapshots
+// of a 500x500 canvas is tens of millions of retained cell entries, which is
+// enough to exhaust a tab's memory during a long drawing session.
+const HISTORY_CELL_BUDGET = 2_000_000
+function getMaxHistoryEntries(canvasWidth: number, canvasHeight: number): number {
+  const cells = canvasWidth * canvasHeight
+  return Math.max(10, Math.min(50, Math.floor(HISTORY_CELL_BUDGET / Math.max(1, cells))))
+}
+
 function HomeContent() {
   const { data: session } = useSession()
   const router = useRouter()
@@ -52,11 +63,19 @@ function HomeContent() {
   const historyIndexRef = useRef(0)
   const lastSavedGridRef = useRef<{ [key: string]: string }>({})
   const historyDebounceTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const localStorageDebounceTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const canvasDimsRef = useRef({ width: canvasWidth, height: canvasHeight })
 
   // Keep grid ref in sync
   useEffect(() => {
     gridRef.current = grid
   }, [grid])
+
+  // Keep canvas dimensions ref in sync (read by the debounced history savers,
+  // which are stable useCallbacks and would otherwise close over stale sizes)
+  useEffect(() => {
+    canvasDimsRef.current = { width: canvasWidth, height: canvasHeight }
+  }, [canvasWidth, canvasHeight])
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -67,18 +86,13 @@ function HomeContent() {
     historyIndexRef.current = historyIndex
   }, [historyIndex])
 
-  // Function to save current grid to history (debounced)
+  // Function to save current grid to history (debounced).
+  // The "did it change" check itself is deferred into the timeout (rather
+  // than run eagerly on every call) since JSON.stringify-ing the whole grid
+  // is wasted work if the user paints several more pixels before the
+  // debounce window elapses anyway - this keeps that cost to at most once
+  // per 500ms of inactivity instead of once per pixel painted.
   const saveToHistory = useCallback(() => {
-    const currentGrid = gridRef.current
-
-    // Check if grid has actually changed
-    const currentGridStr = JSON.stringify(currentGrid)
-    const lastSavedStr = JSON.stringify(lastSavedGridRef.current)
-
-    if (currentGridStr === lastSavedStr) {
-      return // No change, don't save
-    }
-
     // Clear existing timer
     if (historyDebounceTimerRef.current) {
       clearTimeout(historyDebounceTimerRef.current)
@@ -86,31 +100,34 @@ function HomeContent() {
 
     // Set new timer to save after 500ms
     historyDebounceTimerRef.current = setTimeout(() => {
-      if (!isUndoRedoRef.current) {
-        setHistory((hist) => {
-          const currentIdx = historyIndexRef.current
-          const newHistory = hist.slice(0, currentIdx + 1)
-          // Add new state to history
-          newHistory.push(currentGrid)
-          // Limit history to 50 states to prevent memory issues
-          if (newHistory.length > 50) {
-            newHistory.shift()
-            const updatedHistory = newHistory
-            historyRef.current = updatedHistory
-            setHistoryIndex(updatedHistory.length - 1)
-            historyIndexRef.current = updatedHistory.length - 1
-            lastSavedGridRef.current = currentGrid
-            return updatedHistory
-          }
-          const updatedHistory = newHistory
-          historyRef.current = updatedHistory
-          const newIdx = updatedHistory.length - 1
-          setHistoryIndex(newIdx)
-          historyIndexRef.current = newIdx
-          lastSavedGridRef.current = currentGrid
-          return updatedHistory
-        })
+      historyDebounceTimerRef.current = null
+      if (isUndoRedoRef.current) return
+
+      const currentGrid = gridRef.current
+      const currentGridStr = JSON.stringify(currentGrid)
+      const lastSavedStr = JSON.stringify(lastSavedGridRef.current)
+      if (currentGridStr === lastSavedStr) {
+        return // No change, don't save
       }
+
+      setHistory((hist) => {
+        const currentIdx = historyIndexRef.current
+        const newHistory = hist.slice(0, currentIdx + 1)
+        // Add new state to history
+        newHistory.push(currentGrid)
+        // Limit history to prevent memory issues (fewer entries retained for larger canvases)
+        const maxEntries = getMaxHistoryEntries(canvasDimsRef.current.width, canvasDimsRef.current.height)
+        if (newHistory.length > maxEntries) {
+          newHistory.shift()
+        }
+        const updatedHistory = newHistory
+        historyRef.current = updatedHistory
+        const newIdx = updatedHistory.length - 1
+        setHistoryIndex(newIdx)
+        historyIndexRef.current = newIdx
+        lastSavedGridRef.current = currentGrid
+        return updatedHistory
+      })
     }, 500)
   }, [])
 
@@ -138,8 +155,9 @@ function HomeContent() {
         const newHistory = hist.slice(0, currentIdx + 1)
         // Add new state to history
         newHistory.push(currentGrid)
-        // Limit history to 50 states to prevent memory issues
-        if (newHistory.length > 50) {
+        // Limit history to prevent memory issues (fewer entries retained for larger canvases)
+        const maxEntries = getMaxHistoryEntries(canvasDimsRef.current.width, canvasDimsRef.current.height)
+        if (newHistory.length > maxEntries) {
           newHistory.shift()
           const updatedHistory = newHistory
           historyRef.current = updatedHistory
@@ -304,9 +322,23 @@ function HomeContent() {
     }
   }, [pattern, pixelSize, canvasWidth, canvasHeight, savedColors, grid])
 
-  // Save to local storage whenever data changes
+  // Save to local storage whenever data changes (debounced - writing/serializing
+  // the whole drawing on every single pixel painted during a fast drag is
+  // wasted, main-thread-blocking work; the visibility/pagehide/beforeunload
+  // handlers below flush immediately so nothing is lost when the user leaves)
   useEffect(() => {
-    saveToLocalStorage()
+    if (localStorageDebounceTimerRef.current) {
+      clearTimeout(localStorageDebounceTimerRef.current)
+    }
+    localStorageDebounceTimerRef.current = setTimeout(() => {
+      localStorageDebounceTimerRef.current = null
+      saveToLocalStorage()
+    }, 500)
+    return () => {
+      if (localStorageDebounceTimerRef.current) {
+        clearTimeout(localStorageDebounceTimerRef.current)
+      }
+    }
   }, [saveToLocalStorage])
 
   // Save immediately when page is about to be hidden/unloaded (mobile app switching)
@@ -612,11 +644,12 @@ function HomeContent() {
       router.replace(window.location.pathname)
     }
     // Add clear to history immediately (not debounced)
+    const maxHistoryEntries = getMaxHistoryEntries(canvasWidth, canvasHeight)
     setHistory((hist) => {
       const currentIdx = historyIndexRef.current
       const newHistory = hist.slice(0, currentIdx + 1)
       newHistory.push(emptyGrid)
-      if (newHistory.length > 50) {
+      if (newHistory.length > maxHistoryEntries) {
         newHistory.shift()
         const updatedHistory = newHistory
         historyRef.current = updatedHistory

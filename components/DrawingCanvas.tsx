@@ -1,9 +1,38 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import type { MatrixPattern, Tool, SelectionRect } from '@/lib/types'
 import { normalizeRect } from '@/lib/selection'
 import styles from './DrawingCanvas.module.css'
+
+interface PixelProps {
+  row: number
+  col: number
+  color: string
+  pixelSize: number
+  offsetAxis: 'x' | 'y' | 'none'
+  offset: number
+}
+
+// Memoized so that painting one cell doesn't re-render every other cell in
+// the grid - props are kept to primitives (no inline style objects/closures
+// passed in) so React's default shallow comparison actually catches repeats.
+const Pixel = memo(function Pixel({ row, col, color, pixelSize, offsetAxis, offset }: PixelProps) {
+  return (
+    <div
+      data-row={row}
+      data-col={col}
+      className={styles.pixel}
+      style={{
+        width: `${pixelSize}px`,
+        height: `${pixelSize}px`,
+        backgroundColor: color,
+        border: '1px solid #ddd',
+        transform: offsetAxis === 'none' ? 'none' : offsetAxis === 'x' ? `translateX(${offset}px)` : `translateY(${offset}px)`,
+      }}
+    />
+  )
+})
 
 interface DrawingCanvasProps {
   pattern: MatrixPattern
@@ -151,6 +180,17 @@ export default function DrawingCanvas({
     }
     setIsDrawing(true)
     handlePixelClick(row, col)
+  }
+
+  // Single delegated handler on the grid container instead of one onMouseDown
+  // closure per pixel div - keeps Pixel's props free of per-render closures
+  // so React.memo can actually skip re-rendering unchanged cells.
+  const handleContainerMouseDown = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement
+    const rowAttr = target.dataset.row
+    const colAttr = target.dataset.col
+    if (rowAttr === undefined || colAttr === undefined) return
+    handleMouseDown(e, Number(rowAttr), Number(colAttr))
   }
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
@@ -526,64 +566,47 @@ export default function DrawingCanvas({
   }, [handleTouchStart, handleTouchMove, handleTouchEnd])
 
   const renderSquare = (row: number, col: number) => {
-    const color = getPixelColor(row, col)
-    const key = getPixelKey(row, col)
-
     return (
-      <div
-        key={key}
-        className={styles.pixel}
-        style={{
-          width: `${pixelSize}px`,
-          height: `${pixelSize}px`,
-          backgroundColor: color,
-          border: '1px solid #ddd',
-        }}
-        onMouseDown={(e) => handleMouseDown(e, row, col)}
+      <Pixel
+        key={getPixelKey(row, col)}
+        row={row}
+        col={col}
+        color={getPixelColor(row, col)}
+        pixelSize={pixelSize}
+        offsetAxis="none"
+        offset={0}
       />
     )
   }
 
   const renderBrick = (row: number, col: number) => {
-    const color = getPixelColor(row, col)
-    const key = getPixelKey(row, col)
     const isOffset = row % 2 === 1
-    const offset = isOffset ? pixelSize / 2 : 0
 
     return (
-      <div
-        key={key}
-        className={styles.pixel}
-        style={{
-          width: `${pixelSize}px`,
-          height: `${pixelSize}px`,
-          backgroundColor: color,
-          border: '1px solid #ddd',
-          transform: isOffset ? `translateX(${offset}px)` : 'none',
-        }}
-        onMouseDown={(e) => handleMouseDown(e, row, col)}
+      <Pixel
+        key={getPixelKey(row, col)}
+        row={row}
+        col={col}
+        color={getPixelColor(row, col)}
+        pixelSize={pixelSize}
+        offsetAxis="x"
+        offset={isOffset ? pixelSize / 2 : 0}
       />
     )
   }
 
   const renderBrickVertical = (row: number, col: number) => {
-    const color = getPixelColor(row, col)
-    const key = getPixelKey(row, col)
     const isOffset = col % 2 === 1
-    const offset = isOffset ? pixelSize / 2 : 0
 
     return (
-      <div
-        key={key}
-        className={styles.pixel}
-        style={{
-          width: `${pixelSize}px`,
-          height: `${pixelSize}px`,
-          backgroundColor: color,
-          border: '1px solid #ddd',
-          transform: isOffset ? `translateY(${offset}px)` : 'none',
-        }}
-        onMouseDown={(e) => handleMouseDown(e, row, col)}
+      <Pixel
+        key={getPixelKey(row, col)}
+        row={row}
+        col={col}
+        color={getPixelColor(row, col)}
+        pixelSize={pixelSize}
+        offsetAxis="y"
+        offset={isOffset ? pixelSize / 2 : 0}
       />
     )
   }
@@ -642,6 +665,7 @@ export default function DrawingCanvas({
             margin: 'auto',
             flexShrink: 0,
           }}
+          onMouseDown={handleContainerMouseDown}
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseLeave}
