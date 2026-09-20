@@ -44,6 +44,10 @@ function HomeContent() {
   const [tempCanvasHeight, setTempCanvasHeight] = useState('20')
   const [grid, setGrid] = useState<{ [key: string]: string }>({})
   const gridRef = useRef<{ [key: string]: string }>({})
+  // Tracks which ?id= drawing has already been loaded this mount, so a
+  // session refetch (periodic or on window focus) doesn't re-trigger the
+  // load effect and clobber in-progress edits with the original saved data.
+  const loadedDrawingIdRef = useRef<string | null>(null)
   const [tool, setTool] = useState<Tool>('draw')
   // Tool to restore once the color picker has been used - the picker is
   // momentary, unlike fill/draw which stay selected until changed.
@@ -260,10 +264,19 @@ function HomeContent() {
     }
   }, [])
 
-  // Load from saved drawing ID if present
+  // Load from saved drawing ID if present.
+  // NextAuth's SessionProvider refetches the session periodically and on
+  // window focus (see components/SessionProvider.tsx), producing a new
+  // `session` object each time even when nothing meaningful changed. Since
+  // that object is a dependency here, this effect would otherwise re-run and
+  // re-fetch/overwrite the in-progress drawing with the original saved data
+  // - wiping out everything drawn since the page loaded. Guard with a ref so
+  // a given drawing ID is only loaded once per mount, while still reacting
+  // to the session actually becoming available or the id actually changing.
   useEffect(() => {
     const drawingId = searchParams.get('id')
-    if (drawingId && session?.user?.id) {
+    if (drawingId && session?.user?.id && loadedDrawingIdRef.current !== drawingId) {
+      loadedDrawingIdRef.current = drawingId
       const loadDrawing = async () => {
         try {
           const response = await fetch(`/api/drawings/${drawingId}`)
@@ -292,10 +305,15 @@ function HomeContent() {
               historyIndexRef.current = 0
               lastSavedGridRef.current = initialGrid
               setCurrentDrawingId(drawingId)
+            } else {
+              loadedDrawingIdRef.current = null
             }
+          } else {
+            loadedDrawingIdRef.current = null
           }
         } catch (e) {
           console.error('Failed to load drawing', e)
+          loadedDrawingIdRef.current = null
         }
       }
       loadDrawing()
