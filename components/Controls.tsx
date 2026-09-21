@@ -18,6 +18,8 @@ interface ControlsProps {
   onDownload: () => void
   onSave?: () => void
   isSaving?: boolean
+  onSaveAsCopy?: () => void
+  isSavingCopy?: boolean
   onPrint: () => void
   // onPrint is kept for compatibility but not used
 }
@@ -37,6 +39,8 @@ export default function Controls({
   onDownload,
   onSave,
   isSaving,
+  onSaveAsCopy,
+  isSavingCopy,
   onPrint,
 }: ControlsProps) {
   return (
@@ -111,6 +115,15 @@ export default function Controls({
             disabled={isSaving}
           >
             {isSaving ? 'Saving...' : 'Save'}
+          </button>
+        )}
+        {onSaveAsCopy && (
+          <button
+            onClick={onSaveAsCopy}
+            className={styles.button}
+            disabled={isSavingCopy}
+          >
+            {isSavingCopy ? 'Saving...' : 'Save as Copy'}
           </button>
         )}
         <button onClick={onShare} className={styles.button}>

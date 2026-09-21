@@ -14,6 +14,7 @@ import { floodFillGrid } from '@/lib/floodFill'
 import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
 import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData } from '@/lib/types'
 import UserMenu from '@/components/UserMenu'
+import { useToast } from '@/components/ToastProvider'
 import styles from './page.module.css'
 
 // Re-export types for backward compatibility
@@ -34,6 +35,7 @@ function HomeContent() {
   const { data: session } = useSession()
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { showToast } = useToast()
   const [selectedColor, setSelectedColor] = useState('#000000')
   const [savedColors, setSavedColors] = useState<string[]>([])
   const [pattern, setPattern] = useState<MatrixPattern>('squares')
@@ -56,6 +58,7 @@ function HomeContent() {
   const [clipboard, setClipboard] = useState<ClipboardData | null>(null)
   const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [isSavingCopy, setIsSavingCopy] = useState(false)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
   const [showNewDrawingModal, setShowNewDrawingModal] = useState(false)
 
@@ -746,25 +749,27 @@ function HomeContent() {
     }
   }
 
+  const buildDrawingData = (): DrawingData => ({
+    pattern,
+    pixelSize,
+    canvasWidth,
+    canvasHeight,
+    colors: savedColors.reduce((acc, color, idx) => {
+      acc[idx.toString()] = color
+      return acc
+    }, {} as { [key: string]: string }),
+    grid,
+  })
+
   const handleShare = async () => {
-    const data: DrawingData = {
-      pattern,
-      pixelSize,
-      canvasWidth,
-      canvasHeight,
-      colors: savedColors.reduce((acc, color, idx) => {
-        acc[idx.toString()] = color
-        return acc
-      }, {} as { [key: string]: string }),
-      grid,
-    }
+    const data = buildDrawingData()
 
     const encoded = await encodeDrawing(data)
     const url = `${window.location.origin}${window.location.pathname}?drawing=${encoded}`
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(() => {
-        alert('Link copied to clipboard!')
+        showToast('Link copied to clipboard!', 'success')
       })
     } else {
       prompt('Copy this link:', url)
@@ -833,24 +838,14 @@ function HomeContent() {
 
   const handleSave = async () => {
     if (!session?.user?.id) {
-      alert('Please sign in to save drawings')
+      showToast('Please sign in to save drawings', 'error')
       router.push('/auth/signin')
       return
     }
 
     setIsSaving(true)
     try {
-      const drawingData: DrawingData = {
-        pattern,
-        pixelSize,
-        canvasWidth,
-        canvasHeight,
-        colors: savedColors.reduce((acc, color, idx) => {
-          acc[idx.toString()] = color
-          return acc
-        }, {} as { [key: string]: string }),
-        grid,
-      }
+      const drawingData = buildDrawingData()
 
       const body = JSON.stringify({ drawingData })
       const headers = { 'Content-Type': 'application/json' as const }
@@ -885,11 +880,11 @@ function HomeContent() {
 
       if (response.ok) {
         if (currentDrawingId) {
-          alert('Drawing updated!')
+          showToast('Drawing updated!', 'success')
         } else {
           const { drawing } = await response.json()
           setCurrentDrawingId(drawing.id)
-          alert('Drawing saved!')
+          showToast('Drawing saved!', 'success')
         }
       } else {
         throw new Error('Failed to save drawing')
@@ -897,9 +892,57 @@ function HomeContent() {
     } catch (error) {
       console.error('Error saving drawing:', error)
       const message = error instanceof Error ? error.message : 'Failed to save drawing. Please try again.'
-      alert(message)
+      showToast(message, 'error')
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleSaveAsCopy = async () => {
+    if (!session?.user?.id) {
+      showToast('Please sign in to save drawings', 'error')
+      router.push('/auth/signin')
+      return
+    }
+
+    setIsSavingCopy(true)
+    try {
+      const drawingData = buildDrawingData()
+
+      const response = await fetch('/api/drawings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ drawingData }),
+        credentials: 'include',
+      })
+
+      if (response.status === 401) {
+        const freshSession = await getSession()
+        if (!freshSession?.user?.id) {
+          await signOut({ redirect: false })
+          router.push('/auth/signin?error=SessionExpired&callbackUrl=' + encodeURIComponent(window.location.pathname + window.location.search))
+          return
+        }
+        throw new Error('Session expired. Please try saving again.')
+      }
+
+      if (response.ok) {
+        const { drawing } = await response.json()
+        setCurrentDrawingId(drawing.id)
+        // Mark this id as already loaded so the ?id= load effect doesn't
+        // refetch it and reset the undo history now that the URL changes.
+        loadedDrawingIdRef.current = drawing.id
+        router.replace(`${window.location.pathname}?id=${drawing.id}`)
+        showToast('Copy saved', 'success')
+      } else {
+        throw new Error('Failed to save drawing copy')
+      }
+    } catch (error) {
+      console.error('Error saving drawing copy:', error)
+      const message = error instanceof Error ? error.message : 'Failed to save drawing copy. Please try again.'
+      showToast(message, 'error')
+    } finally {
+      setIsSavingCopy(false)
     }
   }
 
@@ -976,6 +1019,8 @@ function HomeContent() {
                 onDownload={handleDownload}
                 onSave={handleSave}
                 isSaving={isSaving}
+                onSaveAsCopy={handleSaveAsCopy}
+                isSavingCopy={isSavingCopy}
                 onPrint={() => { }}
               />
             </div>
@@ -1051,6 +1096,8 @@ function HomeContent() {
                 onDownload={handleDownload}
                 onSave={handleSave}
                 isSaving={isSaving}
+                onSaveAsCopy={handleSaveAsCopy}
+                isSavingCopy={isSavingCopy}
                 onPrint={() => { }}
               />
             </div>

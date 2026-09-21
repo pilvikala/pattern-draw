@@ -20,6 +20,8 @@ interface MobileMenuProps {
   onDownload: () => void
   onSave?: () => void
   isSaving?: boolean
+  onSaveAsCopy?: () => void
+  isSavingCopy?: boolean
   onPrint: () => void
   // onPrint is kept for compatibility but not used
 }
@@ -39,6 +41,8 @@ export default function MobileMenu({
   onDownload,
   onSave,
   isSaving,
+  onSaveAsCopy,
+  isSavingCopy,
   onPrint,
 }: MobileMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
@@ -155,6 +159,15 @@ export default function MobileMenu({
                     disabled={isSaving}
                   >
                     {isSaving ? 'Saving...' : 'Save'}
+                  </button>
+                )}
+                {onSaveAsCopy && (
+                  <button
+                    onClick={onSaveAsCopy}
+                    className={styles.menuButton}
+                    disabled={isSavingCopy}
+                  >
+                    {isSavingCopy ? 'Saving...' : 'Save as Copy'}
                   </button>
                 )}
                 <button onClick={onShare} className={styles.menuButton}>

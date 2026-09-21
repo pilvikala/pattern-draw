@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { deserializeDrawing } from '@/lib/serialization'
 import { generateDrawingPreview } from '@/lib/drawingPreview'
 import type { DrawingData } from '@/lib/types'
+import { useToast } from '@/components/ToastProvider'
 import styles from './page.module.css'
 
 interface Drawing {
@@ -19,6 +20,7 @@ interface Drawing {
 export default function DrawingsPage() {
     const { data: session, status } = useSession()
     const router = useRouter()
+    const { showToast } = useToast()
     const [drawings, setDrawings] = useState<Drawing[]>([])
     const [previews, setPreviews] = useState<Record<string, string>>({})
     const [loading, setLoading] = useState(true)
@@ -76,11 +78,11 @@ export default function DrawingsPage() {
                 delete newPreviews[id]
                 setPreviews(newPreviews)
             } else {
-                alert('Failed to delete drawing')
+                showToast('Failed to delete drawing', 'error')
             }
         } catch (error) {
             console.error('Error deleting drawing:', error)
-            alert('Failed to delete drawing')
+            showToast('Failed to delete drawing', 'error')
         } finally {
             setDeletingId(null)
         }
