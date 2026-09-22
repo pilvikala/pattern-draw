@@ -7,6 +7,7 @@ import styles from './LayersList.module.css'
 export interface LayersListProps {
   layers: Layer[]
   activeLayerId: string
+  canAddLayer: boolean
   onSelectLayer: (id: string) => void
   onAddLayer: () => void
   onDeleteLayer: (id: string) => void
@@ -19,6 +20,7 @@ export interface LayersListProps {
 export default function LayersList({
   layers,
   activeLayerId,
+  canAddLayer,
   onSelectLayer,
   onAddLayer,
   onDeleteLayer,
@@ -48,7 +50,12 @@ export default function LayersList({
 
   return (
     <div className={styles.layersList}>
-      <button onClick={onAddLayer} className={styles.addButton}>
+      <button
+        onClick={onAddLayer}
+        className={styles.addButton}
+        disabled={!canAddLayer}
+        title={canAddLayer ? undefined : 'Maximum number of layers reached'}
+      >
         + Add Layer
       </button>
 

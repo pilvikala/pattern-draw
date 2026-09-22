@@ -16,8 +16,13 @@
   transition: background 0.2s;
 }
 
-.addButton:hover {
+.addButton:hover:not(:disabled) {
   background: #0051cc;
+}
+
+.addButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .rows {

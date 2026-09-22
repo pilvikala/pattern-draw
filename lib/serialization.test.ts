@@ -214,4 +214,11 @@ describe('decodeDrawing security bounds (compact-format path)', () => {
     expect(result).not.toBeNull()
     expect(result!.layers.length).toBeLessThanOrEqual(50)
   })
+
+  it('rejects a compact payload longer than the hard size backstop before parsing it', () => {
+    // A pathological string that would otherwise force compact.split('|')
+    // to materialize millions of elements before any per-field cap runs.
+    const huge = 'v2|' + 'x|'.repeat(6_000_000)
+    expect(deserializeDrawing(huge)).toBeNull()
+  })
 })

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { serializeDrawing } from '@/lib/serialization'
-import type { DrawingData } from '@/lib/types'
+import { normalizeDrawingData } from '@/lib/layers'
 
 // GET /api/drawings - List all drawings for the authenticated user
 export async function GET(request: NextRequest) {
@@ -63,8 +63,14 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        // Serialize the drawing data
-        const serialized = serializeDrawing(drawingData as DrawingData)
+        // Normalize before serializing - drawingData is client-supplied JSON
+        // cast with no runtime validation; without this an authenticated
+        // user could POST a crafted payload (huge canvas, thousands of
+        // layers, out-of-bounds grid entries) that serializeDrawing would
+        // faithfully encode into the stored string, which every later load
+        // of this drawing (including this same user's own drawings list
+        // and the GET route) would then have to parse back out.
+        const serialized = serializeDrawing(normalizeDrawingData(drawingData))
 
         const drawing = await prisma.drawing.create({
             data: {

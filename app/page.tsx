@@ -14,7 +14,7 @@ import LayersDrawer from '@/components/LayersDrawer'
 import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
 import { floodFillGrid } from '@/lib/floodFill'
 import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
-import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData } from '@/lib/layers'
+import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, MAX_LAYERS } from '@/lib/layers'
 import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry } from '@/lib/types'
 import { TRANSPARENT } from '@/lib/types'
 import UserMenu from '@/components/UserMenu'
@@ -933,6 +933,14 @@ function HomeContent() {
   // directly is safe here since it's always kept in sync synchronously.
 
   const handleAddLayer = useCallback(() => {
+    // Mirrors the MAX_LAYERS cap normalizeDrawingData enforces for
+    // loaded/shared data - without this, ordinary repeated clicking could
+    // grow every composite, history snapshot, and localStorage payload
+    // past the same limit that guard exists to enforce.
+    if (layersRef.current.length >= MAX_LAYERS) {
+      showToast(`A drawing can have at most ${MAX_LAYERS} layers.`, 'error')
+      return
+    }
     const newIndex = layersRef.current.length
     const newLayer = createLayer(`Layer ${newIndex + 1}`)
     const newLayers = [...layersRef.current, newLayer]
@@ -942,7 +950,7 @@ function HomeContent() {
     activeLayerIndexRef.current = newIndex
     setSelection(null)
     saveToHistoryImmediate()
-  }, [saveToHistoryImmediate])
+  }, [saveToHistoryImmediate, showToast])
 
   const handleDeleteLayer = useCallback((id: string) => {
     const prev = layersRef.current
@@ -1052,6 +1060,7 @@ function HomeContent() {
   const layersPanelProps = {
     layers,
     activeLayerId: activeLayer?.id || '',
+    canAddLayer: layers.length < MAX_LAYERS,
     onSelectLayer: handleSetActiveLayer,
     onAddLayer: handleAddLayer,
     onDeleteLayer: handleDeleteLayer,

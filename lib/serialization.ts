@@ -11,6 +11,20 @@ import { createLayer, createLayerId, migrateGridToLayers, normalizeDrawingData, 
 // is MAX_CANVAS_DIMENSION^2, so this never rejects a real drawing.
 const MAX_GRID_ENTRIES_PER_LAYER = MAX_CANVAS_DIMENSION * MAX_CANVAS_DIMENSION
 
+// Bounds the raw string before any parsing touches it. The per-field caps
+// above only kick in once compact.split('|') (and each layer's grid
+// .split(';')) has already materialized an array with one element per
+// separator in the input - for a maliciously huge string (e.g. millions of
+// '|'/';' characters, cheap to produce with a compressed `?drawing=` link
+// since gzip handles repetitive input extremely well) that allocation cost
+// happens regardless of where the loops stop afterward. Rejecting the
+// string outright above this length protects every split() call in
+// deserializeDrawing/deserializeV1/deserializeV2 at once. 10M characters is
+// already far beyond anything a legitimately-sized drawing needs to encode
+// (our own encodeDrawing warns well before 2,000 characters), so this is a
+// hard backstop against crafted input, not a realistic ceiling.
+const MAX_COMPACT_STRING_LENGTH = 10_000_000
+
 /**
  * Serializes drawing data into a compact string format.
  *
@@ -79,6 +93,10 @@ export function serializeDrawing(data: DrawingData): string {
  * single-grid format.
  */
 export function deserializeDrawing(compact: string): DrawingData | null {
+  if (compact.length > MAX_COMPACT_STRING_LENGTH) {
+    console.error('Compact drawing payload too large, rejecting')
+    return null
+  }
   try {
     const parts = compact.split('|')
     if (parts.length < 6) return null
