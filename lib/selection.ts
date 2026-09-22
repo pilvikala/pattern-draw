@@ -1,3 +1,4 @@
+import { TRANSPARENT } from './types'
 import type { SelectionRect, ClipboardData } from './types'
 
 export function normalizeRect(rowA: number, colA: number, rowB: number, colB: number): SelectionRect {
@@ -9,8 +10,8 @@ export function normalizeRect(rowA: number, colA: number, rowB: number, colB: nu
   }
 }
 
-// Extracts a dense snapshot of the rect (missing cells become white) so a
-// paste always fully overwrites the target area, matching raster clipboard behavior.
+// Extracts a dense snapshot of the rect (missing cells become TRANSPARENT) so
+// a paste always fully overwrites the target area, matching raster clipboard behavior.
 export function copySelectionCells(
   grid: { [key: string]: string },
   rect: SelectionRect
@@ -18,7 +19,7 @@ export function copySelectionCells(
   const cells: { [key: string]: string } = {}
   for (let row = rect.startRow; row <= rect.endRow; row++) {
     for (let col = rect.startCol; col <= rect.endCol; col++) {
-      cells[`${row - rect.startRow},${col - rect.startCol}`] = grid[`${row},${col}`] || '#ffffff'
+      cells[`${row - rect.startRow},${col - rect.startCol}`] = grid[`${row},${col}`] || TRANSPARENT
     }
   }
   return {
@@ -57,7 +58,7 @@ export function pasteClipboardToGrid(
     if (row < 0 || row >= canvasHeight || col < 0 || col >= canvasWidth) continue
 
     const color = clipboard.cells[relKey]
-    if (color === '#ffffff') {
+    if (color === TRANSPARENT) {
       delete newGrid[`${row},${col}`]
     } else {
       newGrid[`${row},${col}`] = color

@@ -40,7 +40,11 @@ interface DrawingCanvasProps {
   canvasWidth: number
   canvasHeight: number
   selectedColor: string
+  // Composited view of all visible layers - what's actually rendered.
   grid: { [key: string]: string }
+  // Just the active layer's cells - used for the moving-selection preview so
+  // it shows only what's actually being relocated, not layers beneath it.
+  activeLayerGrid: { [key: string]: string }
   onPixelFill: (key: string, color: string) => void
   tool: Tool
   selection: SelectionRect | null
@@ -55,6 +59,7 @@ export default function DrawingCanvas({
   canvasHeight,
   selectedColor,
   grid,
+  activeLayerGrid,
   onPixelFill,
   tool,
   selection,
@@ -95,6 +100,11 @@ export default function DrawingCanvas({
   const getPixelColor = (row: number, col: number): string => {
     const key = getPixelKey(row, col)
     return grid[key] || '#ffffff'
+  }
+
+  const getActiveLayerPixelColor = (row: number, col: number): string => {
+    const key = getPixelKey(row, col)
+    return activeLayerGrid[key] || '#ffffff'
   }
 
   const isInsideSelection = (row: number, col: number): boolean => {
@@ -159,7 +169,7 @@ export default function DrawingCanvas({
         for (let r = selection.startRow; r <= selection.endRow; r++) {
           const rowColors: string[] = []
           for (let c = selection.startCol; c <= selection.endCol; c++) {
-            rowColors.push(getPixelColor(r, c))
+            rowColors.push(getActiveLayerPixelColor(r, c))
           }
           snapshot.push(rowColors)
         }
@@ -293,7 +303,7 @@ export default function DrawingCanvas({
           for (let r = selection.startRow; r <= selection.endRow; r++) {
             const rowColors: string[] = []
             for (let c = selection.startCol; c <= selection.endCol; c++) {
-              rowColors.push(getPixelColor(r, c))
+              rowColors.push(getActiveLayerPixelColor(r, c))
             }
             snapshot.push(rowColors)
           }
@@ -368,7 +378,7 @@ export default function DrawingCanvas({
         }
       }
     }
-  }, [isSingleClickMode, isSelectMode, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange, grid])
+  }, [isSingleClickMode, isSelectMode, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange, activeLayerGrid])
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     // Handle pinch gesture

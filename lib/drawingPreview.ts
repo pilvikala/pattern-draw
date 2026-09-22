@@ -1,4 +1,5 @@
-import type { DrawingData, MatrixPattern } from '@/lib/types'
+import type { DrawingData } from '@/lib/types'
+import { compositeLayers } from '@/lib/layers'
 
 /**
  * Generates a data URL for a drawing preview image
@@ -14,7 +15,8 @@ export function generateDrawingPreview(
     const ctx = canvas.getContext('2d')
     if (!ctx) return ''
 
-    const { pattern, pixelSize, canvasWidth, canvasHeight, grid } = drawingData
+    const { pattern, pixelSize, canvasWidth, canvasHeight, layers } = drawingData
+    const grid = compositeLayers(layers)
 
     // Calculate scale to fit within maxSize
     const cols = canvasWidth

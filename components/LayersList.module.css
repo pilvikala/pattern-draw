@@ -1,0 +1,126 @@
+.layersList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.addButton {
+  padding: 0.6rem 1rem;
+  background: #0070f3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.addButton:hover {
+  background: #0051cc;
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+}
+
+.rowActive {
+  border-color: #0070f3;
+  background: #eef6ff;
+}
+
+.visibilityToggle {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  padding: 0;
+}
+
+.visibilityToggle:hover {
+  color: #0070f3;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.nameInput {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.9rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid #0070f3;
+  border-radius: 4px;
+}
+
+.rowActions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.2rem;
+}
+
+.iconButton {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  line-height: 1;
+  color: #555;
+  cursor: pointer;
+  padding: 0;
+}
+
+.iconButton:hover:not(:disabled) {
+  background: #eee;
+  color: #333;
+}
+
+.iconButton:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.deleteButton {
+  font-size: 1rem;
+}
+
+.deleteButton:hover:not(:disabled) {
+  background: #fdeaea;
+  color: #d32f2f;
+}
