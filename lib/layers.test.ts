@@ -215,6 +215,22 @@ describe('normalizeDrawingData', () => {
     expect(result.layers[0].name).toBe('Layer')
   })
 
+  it('drops non-string color values instead of passing them through', () => {
+    // serializeDrawing's compressColor calls .replace() on each color value
+    // assuming a hex string - a non-string value here would crash it later
+    // (in the share-link encoder, or server-side since the save routes now
+    // normalize before serializing).
+    const result = normalizeDrawingData({ colors: { '0': '#ff0000', '1': 12345, '2': null, '3': '#00ff00' } })
+    expect(result.colors).toEqual({ '0': '#ff0000', '3': '#00ff00' })
+  })
+
+  it('caps an excessive saved-colors count (rendering DoS guard)', () => {
+    const manyColors: Record<string, string> = {}
+    for (let i = 0; i < 5000; i++) manyColors[String(i)] = '#ff0000'
+    const result = normalizeDrawingData({ colors: manyColors })
+    expect(Object.keys(result.colors).length).toBeLessThanOrEqual(200)
+  })
+
   it('clamps an out-of-range activeLayerIndex', () => {
     const raw = {
       layers: [

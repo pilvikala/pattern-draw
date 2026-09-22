@@ -25,6 +25,52 @@ const MAX_GRID_ENTRIES_PER_LAYER = MAX_CANVAS_DIMENSION * MAX_CANVAS_DIMENSION
 // hard backstop against crafted input, not a realistic ceiling.
 const MAX_COMPACT_STRING_LENGTH = 10_000_000
 
+// Rejects an absurdly long encoded `?drawing=` value before doing any
+// base64/decompression work on it at all - a cheap first-pass filter
+// independent of the decompression-bomb guard below.
+const MAX_ENCODED_LENGTH = 20_000_000
+
+// gzip handles repetitive input extremely well, so a tiny encoded payload
+// (well under MAX_ENCODED_LENGTH) can still decompress into an enormous
+// string - a classic decompression-bomb. The old code only checked the
+// decompressed string's length *after* decodeDrawing had already fully
+// buffered it via `new Response(stream.readable).arrayBuffer()`, so that
+// buffering itself needs its own bound. This reads the decompression stream
+// incrementally and aborts as soon as the byte budget is exceeded, instead
+// of materializing the whole (potentially huge) output first. Tied to
+// MAX_COMPACT_STRING_LENGTH (same underlying budget: how big a decoded
+// payload deserializeDrawing is willing to parse) rather than a second,
+// independently-tunable number that could silently drift from it.
+const MAX_DECOMPRESSED_BYTES = MAX_COMPACT_STRING_LENGTH
+
+async function readStreamBounded(readable: ReadableStream<Uint8Array>, maxBytes: number): Promise<Uint8Array | null> {
+  const reader = readable.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      total += value.length
+      if (total > maxBytes) {
+        await reader.cancel('decompressed payload too large')
+        return null
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const result = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    result.set(chunk, offset)
+    offset += chunk.length
+  }
+  return result
+}
+
 /**
  * Serializes drawing data into a compact string format.
  *
@@ -101,11 +147,15 @@ export function deserializeDrawing(compact: string): DrawingData | null {
     const parts = compact.split('|')
     if (parts.length < 6) return null
 
-    if (parts[0] === 'v2') {
-      return deserializeV2(parts)
-    }
-
-    return deserializeV1(parts)
+    const result = parts[0] === 'v2' ? deserializeV2(parts) : deserializeV1(parts)
+    // Always normalized before returning - this function is called directly
+    // by more than just decodeDrawing (the saved-drawings list page and the
+    // drawing GET route both call it on stored data too), and the per-field
+    // caps above only bound layer count and grid-entries-per-layer, not
+    // canvasWidth/canvasHeight/pixelSize. Normalizing here once means every
+    // caller gets fully bounded data with no risk of a direct caller
+    // bypassing the limits normalizeDrawingData enforces.
+    return result ? normalizeDrawingData(result) : null
   } catch (e) {
     console.error('Failed to deserialize', e)
     return null
@@ -251,6 +301,10 @@ export async function encodeDrawing(data: DrawingData): Promise<string> {
  * Also supports legacy JSON format for backward compatibility
  */
 export async function decodeDrawing(encoded: string): Promise<DrawingData | null> {
+  if (encoded.length > MAX_ENCODED_LENGTH) {
+    console.error('Encoded drawing payload too large, rejecting')
+    return null
+  }
   try {
     // Restore base64url to base64
     const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/')
@@ -270,11 +324,25 @@ export async function decodeDrawing(encoded: string): Promise<DrawingData | null
 
         const stream = new DecompressionStream('gzip')
         const writer = stream.writable.getWriter()
-        writer.write(bytes)
-        writer.close()
+        // Not awaited (reading below drives the pipe), but caught - when
+        // readStreamBounded cancels the reader early (payload too large),
+        // these writes reject as a side effect, and an uncaught rejection
+        // on a promise nobody awaits surfaces as an unhandled rejection.
+        writer.write(bytes).catch(() => {})
+        writer.close().catch(() => {})
 
-        const decompressed = await new Response(stream.readable).arrayBuffer()
-        decoded = new TextDecoder().decode(decompressed)
+        // Read incrementally with a byte budget rather than
+        // `new Response(stream.readable).arrayBuffer()`, which would buffer
+        // the full decompressed output - unbounded - before anything could
+        // check its size. gzip's compression ratio on repetitive input
+        // means a small encoded payload can still decompress into far more
+        // than MAX_COMPACT_STRING_LENGTH's worth of characters.
+        const decompressedBytes = await readStreamBounded(stream.readable, MAX_DECOMPRESSED_BYTES)
+        if (!decompressedBytes) {
+          console.error('Decompressed drawing payload too large, rejecting')
+          return null
+        }
+        decoded = new TextDecoder().decode(decompressedBytes)
       } else {
         decoded = atob(base64Padded)
       }
@@ -283,15 +351,11 @@ export async function decodeDrawing(encoded: string): Promise<DrawingData | null
       decoded = atob(base64Padded)
     }
 
-    // Try compact format first. Routed through normalizeDrawingData just
-    // like the JSON fallback below - deserializeDrawing parses dimensions
-    // and layer count straight out of the (attacker-controlled) `?drawing=`
-    // payload with no bounds, so without this a crafted link could still
-    // smuggle e.g. a 1,000,000x1,000,000 canvas or thousands of layers
-    // straight past the limits normalizeDrawingData otherwise enforces.
+    // Try compact format first - deserializeDrawing already normalizes its
+    // result (see its own comment), so this is bounded regardless of format.
     const compactData = deserializeDrawing(decoded)
     if (compactData) {
-      return normalizeDrawingData(compactData)
+      return compactData
     }
 
     // Fallback to old JSON format (pre-dates the compact format entirely)

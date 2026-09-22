@@ -15,6 +15,7 @@ import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
 import { floodFillGrid } from '@/lib/floodFill'
 import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
 import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, MAX_LAYERS } from '@/lib/layers'
+import { trimHistoryToBudget } from '@/lib/history'
 import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry } from '@/lib/types'
 import { TRANSPARENT } from '@/lib/types'
 import UserMenu from '@/components/UserMenu'
@@ -23,39 +24,6 @@ import styles from './page.module.css'
 
 // Re-export types for backward compatibility
 export type { MatrixPattern, DrawingData } from '@/lib/types'
-
-// Bounds the undo stack's total memory footprint (roughly this many grid
-// cells, summed across all retained snapshots and all layers) instead of a
-// flat entry count or a flat max-entries count. Either flat cap breaks down
-// once an entry's own cost changes over a session (canvas resized, layers
-// added/removed): a max-entries figure computed from just the newest entry
-// doesn't bound the total once older, differently-sized entries are mixed
-// in, and trimming only one entry per commit can leave the stack far above
-// budget for many edits while it catches up. Trimming from the oldest entry
-// until the *summed* cost of what's retained fits the budget handles both -
-// and computing each entry's cost from its own stored grids (rather than
-// the *current* canvas size) keeps it correct across a resize too: an old
-// snapshot from before a resize-down would otherwise be charged as if it
-// were small, letting the stack retain far more than the budget permits.
-const HISTORY_CELL_BUDGET = 2_000_000
-function historyEntryCellCost(entry: HistoryEntry): number {
-  let cost = 0
-  for (const layer of entry.layers) {
-    cost += Object.keys(layer.grid).length
-  }
-  return Math.max(1, cost)
-}
-function trimHistoryToBudget(history: HistoryEntry[]): HistoryEntry[] {
-  const trimmed = history.slice()
-  let totalCost = trimmed.reduce((sum, entry) => sum + historyEntryCellCost(entry), 0)
-  // Always keep at least the most recent entry, even over budget - there
-  // must be something to undo/redo against.
-  while (trimmed.length > 1 && totalCost > HISTORY_CELL_BUDGET) {
-    totalCost -= historyEntryCellCost(trimmed[0])
-    trimmed.shift()
-  }
-  return trimmed
-}
 
 // A drawing shared as a URL becomes unwieldy (and risks silent truncation by
 // chat apps, SMS, older proxies, etc.) past roughly this many characters.
@@ -297,7 +265,9 @@ function HomeContent() {
           if (response.ok) {
             const { drawingData } = await response.json()
             if (drawingData) {
-              applyLoadedDrawing(normalizeDrawingData(drawingData))
+              // Already normalized server-side: the GET route reads it via
+              // deserializeDrawing, which now always normalizes internally.
+              applyLoadedDrawing(drawingData)
               setCurrentDrawingId(drawingId)
             } else {
               loadedDrawingIdRef.current = null

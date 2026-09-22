@@ -221,4 +221,53 @@ describe('decodeDrawing security bounds (compact-format path)', () => {
     const huge = 'v2|' + 'x|'.repeat(6_000_000)
     expect(deserializeDrawing(huge)).toBeNull()
   })
+
+  it('deserializeDrawing itself clamps dimensions, not just callers that route through decodeDrawing', () => {
+    // The saved-drawings list page and the drawing GET route both call
+    // deserializeDrawing directly (not decodeDrawing), so the bound has to
+    // live inside deserializeDrawing itself to protect them too.
+    const malicious = drawing({ canvasWidth: 1_000_000, canvasHeight: 1_000_000 })
+    const compact = serializeDrawing(malicious)
+    const result = deserializeDrawing(compact)
+
+    expect(result).not.toBeNull()
+    expect(result!.canvasWidth).toBeLessThanOrEqual(500)
+    expect(result!.canvasHeight).toBeLessThanOrEqual(500)
+  })
+})
+
+describe('decodeDrawing decompression-bomb guard', () => {
+  async function gzipBase64Url(text: string): Promise<string> {
+    const stream = new CompressionStream('gzip')
+    const writer = stream.writable.getWriter()
+    writer.write(new TextEncoder().encode(text))
+    writer.close()
+    const compressed = await new Response(stream.readable).arrayBuffer()
+    return btoa(String.fromCharCode(...new Uint8Array(compressed)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '')
+  }
+
+  it('rejects a tiny gzip payload that decompresses far past the byte budget', async () => {
+    // Highly repetitive text compresses to a few KB but expands to 15MB -
+    // exactly the "small encoded, huge decompressed" shape a decompression
+    // bomb exploits. Buffering the full output before checking its size
+    // (the old behavior) would defeat the point of bounding it at all.
+    const bomb = await gzipBase64Url('a'.repeat(15_000_000))
+    const result = await decodeDrawing(bomb)
+    expect(result).toBeNull()
+  })
+
+  it('rejects an absurdly long encoded value before attempting to decode it', async () => {
+    const result = await decodeDrawing('x'.repeat(25_000_000))
+    expect(result).toBeNull()
+  })
+
+  it('still decodes a normal-sized drawing correctly (guard does not affect real use)', async () => {
+    const data = drawing({ layers: [{ id: 'l1', name: 'Layer 1', visible: true, grid: { '1,1': '#ff0000' } }] })
+    const encoded = await encodeDrawing(data)
+    const result = await decodeDrawing(encoded)
+    expect(result?.layers[0].grid).toEqual({ '1,1': '#ff0000' })
+  })
 })

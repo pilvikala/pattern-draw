@@ -120,6 +120,29 @@ function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight:
   return grid
 }
 
+// A user's saved-color palette realistically never approaches even a few
+// dozen entries; capped for the same reason as MAX_LAYERS - ColorPalette
+// renders one DOM element per entry, so an unbounded count from a crafted
+// payload is a rendering DoS just like an unbounded layer count would be.
+const MAX_SAVED_COLORS = 200
+
+// Same "cast without checking" hazard as the pattern/grid fields above: a
+// non-string color value here (e.g. `{ colors: { "0": 12345 } }` from
+// tampered localStorage or a hand-edited shared link) passes normalization
+// unchanged and later crashes serializeDrawing/compressColor, which calls
+// .replace() on it assuming a hex string - that's reachable both from the
+// share-link encoder and, since the API routes now normalize before
+// serializing, from the save routes too.
+function normalizeColors(rawColors: unknown): { [key: string]: string } {
+  const colors: { [key: string]: string } = {}
+  if (!rawColors || typeof rawColors !== 'object') return colors
+  for (const [key, value] of Object.entries(rawColors as Record<string, unknown>)) {
+    if (Object.keys(colors).length >= MAX_SAVED_COLORS) break
+    if (typeof value === 'string' && value) colors[key] = value
+  }
+  return colors
+}
+
 // Normalizes any raw drawing payload - current-format (with `layers`),
 // pre-layers format (with a flat `grid`), or a partially-malformed object
 // from localStorage/an old shared link - into a valid DrawingData.
@@ -130,7 +153,7 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
   const pixelSize = normalizePixelSize(data.pixelSize)
   const canvasWidth = normalizeCanvasDimension(data.canvasWidth, 20)
   const canvasHeight = normalizeCanvasDimension(data.canvasHeight, 20)
-  const colors = (data.colors as { [key: string]: string }) || {}
+  const colors = normalizeColors(data.colors)
 
   let layers: Layer[]
   if (Array.isArray(data.layers) && data.layers.length > 0) {
