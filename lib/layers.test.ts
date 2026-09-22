@@ -159,6 +159,62 @@ describe('normalizeDrawingData', () => {
     expect(normalizeDrawingData({ canvasWidth: 'huge', canvasHeight: null }).canvasWidth).toBe(20)
   })
 
+  it('clamps pixelSize to the 10-50 slider range', () => {
+    expect(normalizeDrawingData({ pixelSize: -100 }).pixelSize).toBe(10)
+    expect(normalizeDrawingData({ pixelSize: 999999 }).pixelSize).toBe(50)
+    expect(normalizeDrawingData({ pixelSize: 'huge' }).pixelSize).toBe(15)
+  })
+
+  it('drops grid cells outside the (clamped) canvas bounds', () => {
+    const raw = {
+      canvasWidth: 5,
+      canvasHeight: 5,
+      layers: [{
+        id: 'a',
+        name: 'Layer 1',
+        visible: true,
+        grid: {
+          '0,0': '#ff0000',
+          '4,4': '#00ff00',
+          '99999,99999': '#0000ff',
+          '-1,0': '#0000ff',
+          '2,2': '#000000',
+        },
+      }],
+    }
+    const result = normalizeDrawingData(raw)
+    expect(result.layers[0].grid).toEqual({ '0,0': '#ff0000', '4,4': '#00ff00', '2,2': '#000000' })
+  })
+
+  it('drops malformed grid keys and non-string values', () => {
+    const raw = {
+      canvasWidth: 5,
+      canvasHeight: 5,
+      layers: [{
+        id: 'a',
+        name: 'Layer 1',
+        visible: true,
+        grid: {
+          'not-a-key': '#ff0000',
+          '1,1': 12345,
+          '2,2': '',
+          '3,3': '#00ff00',
+        },
+      }],
+    }
+    const result = normalizeDrawingData(raw)
+    expect(result.layers[0].grid).toEqual({ '3,3': '#00ff00' })
+  })
+
+  it('falls back to a string id/name when the raw layer supplies non-strings', () => {
+    const raw = {
+      layers: [{ id: 42, name: { toString: () => 'evil' }, visible: true, grid: {} }],
+    }
+    const result = normalizeDrawingData(raw)
+    expect(typeof result.layers[0].id).toBe('string')
+    expect(result.layers[0].name).toBe('Layer')
+  })
+
   it('clamps an out-of-range activeLayerIndex', () => {
     const raw = {
       layers: [

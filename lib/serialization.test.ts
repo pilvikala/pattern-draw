@@ -196,4 +196,22 @@ describe('decodeDrawing security bounds (compact-format path)', () => {
     expect(result).not.toBeNull()
     expect(result!.layers.length).toBeLessThanOrEqual(50)
   })
+
+  it('deserializeDrawing itself stops parsing at the layer cap, not just the normalizeDrawingData wrapper', () => {
+    // Exercises deserializeV2's own loop bound directly (sync, no
+    // decodeDrawing/normalizeDrawingData involved) - the whole point of the
+    // fix is that parsing stops early rather than building every layer
+    // first and capping the result afterward.
+    const manyLayers = Array.from({ length: 60 }, (_, i) => ({
+      id: `l${i}`,
+      name: `Layer ${i}`,
+      visible: true,
+      grid: { '0,0': '#ff0000' },
+    }))
+    const compact = serializeDrawing(drawing({ layers: manyLayers, activeLayerIndex: 0 }))
+    const result = deserializeDrawing(compact)
+
+    expect(result).not.toBeNull()
+    expect(result!.layers.length).toBeLessThanOrEqual(50)
+  })
 })

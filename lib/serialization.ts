@@ -1,5 +1,15 @@
 import type { DrawingData, Layer, MatrixPattern } from '@/lib/types'
-import { createLayer, createLayerId, migrateGridToLayers, normalizeDrawingData, clampActiveLayerIndex } from '@/lib/layers'
+import { createLayer, createLayerId, migrateGridToLayers, normalizeDrawingData, clampActiveLayerIndex, MAX_LAYERS, MAX_CANVAS_DIMENSION } from '@/lib/layers'
+
+// A generous sanity bound on grid entries parsed per layer while decoding -
+// independent of (and coarser than) normalizeDrawingData's exact per-canvas
+// coordinate validation, which runs afterward. Without this, a crafted
+// `?drawing=` payload with a huge grid string would still get fully split
+// and parsed into a huge object before normalizeDrawingData ever gets a
+// chance to bound it - the parsing cost itself needs its own limit. The
+// legitimate maximum (a fully painted canvas at the largest allowed size)
+// is MAX_CANVAS_DIMENSION^2, so this never rejects a real drawing.
+const MAX_GRID_ENTRIES_PER_LAYER = MAX_CANVAS_DIMENSION * MAX_CANVAS_DIMENSION
 
 /**
  * Serializes drawing data into a compact string format.
@@ -108,12 +118,13 @@ function deserializeV1(parts: string[]): DrawingData | null {
 
   const grid: { [key: string]: string } = {}
   if (parts[6]) {
-    parts[6].split(';').forEach((entry) => {
-      const [key, color] = entry.split(':')
+    const entries = parts[6].split(';')
+    for (let i = 0; i < entries.length && i < MAX_GRID_ENTRIES_PER_LAYER; i++) {
+      const [key, color] = entries[i].split(':')
       if (key && color) {
         grid[key] = allColors[color]
       }
-    })
+    }
   }
 
   return {
@@ -152,16 +163,19 @@ function deserializeV2(parts: string[]): DrawingData | null {
 
   const layerFields = parts.slice(8)
   const layers: Layer[] = []
-  for (let i = 0; i + 2 < layerFields.length; i += 3) {
+  // Stop once MAX_LAYERS is reached instead of parsing every triple in the
+  // payload and only capping the result afterward - see MAX_GRID_ENTRIES_PER_LAYER above.
+  for (let i = 0; i + 2 < layerFields.length && layers.length < MAX_LAYERS; i += 3) {
     const name = decodeURIComponent(layerFields[i] || 'Layer')
     const visible = layerFields[i + 1] !== '0'
     const gridStr = layerFields[i + 2] || ''
     const grid: { [key: string]: string } = {}
     if (gridStr) {
-      gridStr.split(';').forEach((entry) => {
-        const [key, colorIdx] = entry.split(':')
+      const entries = gridStr.split(';')
+      for (let j = 0; j < entries.length && j < MAX_GRID_ENTRIES_PER_LAYER; j++) {
+        const [key, colorIdx] = entries[j].split(':')
         if (key && colorIdx !== undefined) grid[key] = allColors[colorIdx]
-      })
+      }
     }
     layers.push({ id: createLayerId(), name, visible, grid })
   }

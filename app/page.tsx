@@ -32,18 +32,26 @@ export type { MatrixPattern, DrawingData } from '@/lib/types'
 // doesn't bound the total once older, differently-sized entries are mixed
 // in, and trimming only one entry per commit can leave the stack far above
 // budget for many edits while it catches up. Trimming from the oldest entry
-// until the *summed* cost of what's retained fits the budget handles both.
+// until the *summed* cost of what's retained fits the budget handles both -
+// and computing each entry's cost from its own stored grids (rather than
+// the *current* canvas size) keeps it correct across a resize too: an old
+// snapshot from before a resize-down would otherwise be charged as if it
+// were small, letting the stack retain far more than the budget permits.
 const HISTORY_CELL_BUDGET = 2_000_000
-function historyEntryCellCost(entry: HistoryEntry, canvasWidth: number, canvasHeight: number): number {
-  return canvasWidth * canvasHeight * Math.max(1, entry.layers.length)
+function historyEntryCellCost(entry: HistoryEntry): number {
+  let cost = 0
+  for (const layer of entry.layers) {
+    cost += Object.keys(layer.grid).length
+  }
+  return Math.max(1, cost)
 }
-function trimHistoryToBudget(history: HistoryEntry[], canvasWidth: number, canvasHeight: number): HistoryEntry[] {
+function trimHistoryToBudget(history: HistoryEntry[]): HistoryEntry[] {
   const trimmed = history.slice()
-  let totalCost = trimmed.reduce((sum, entry) => sum + historyEntryCellCost(entry, canvasWidth, canvasHeight), 0)
+  let totalCost = trimmed.reduce((sum, entry) => sum + historyEntryCellCost(entry), 0)
   // Always keep at least the most recent entry, even over budget - there
   // must be something to undo/redo against.
   while (trimmed.length > 1 && totalCost > HISTORY_CELL_BUDGET) {
-    totalCost -= historyEntryCellCost(trimmed[0], canvasWidth, canvasHeight)
+    totalCost -= historyEntryCellCost(trimmed[0])
     trimmed.shift()
   }
   return trimmed
@@ -109,7 +117,6 @@ function HomeContent() {
   const lastSavedLayersRef = useRef<Layer[]>(layers)
   const historyDebounceTimerRef = useRef<NodeJS.Timeout | null>(null)
   const localStorageDebounceTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const canvasDimsRef = useRef({ width: canvasWidth, height: canvasHeight })
 
   // The flattened view of all visible layers - what's actually drawn on the
   // canvas and what export/preview render.
@@ -124,12 +131,6 @@ function HomeContent() {
   useEffect(() => {
     activeLayerIndexRef.current = activeLayerIndex
   }, [activeLayerIndex])
-
-  // Keep canvas dimensions ref in sync (read by the debounced history savers,
-  // which are stable useCallbacks and would otherwise close over stale sizes)
-  useEffect(() => {
-    canvasDimsRef.current = { width: canvasWidth, height: canvasHeight }
-  }, [canvasWidth, canvasHeight])
 
   useEffect(() => {
     historyRef.current = history
@@ -152,7 +153,7 @@ function HomeContent() {
     const currentIdx = historyIndexRef.current
     const newHistory = historyRef.current.slice(0, currentIdx + 1)
     newHistory.push({ layers: currentLayers, activeLayerIndex: activeLayerIndexRef.current })
-    const trimmedHistory = trimHistoryToBudget(newHistory, canvasDimsRef.current.width, canvasDimsRef.current.height)
+    const trimmedHistory = trimHistoryToBudget(newHistory)
     historyRef.current = trimmedHistory
     const newIdx = trimmedHistory.length - 1
     historyIndexRef.current = newIdx

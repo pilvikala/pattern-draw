@@ -62,20 +62,63 @@ function normalizePattern(value: unknown): MatrixPattern {
 // or localStorage bypasses that form entirely, so without clamping here a
 // crafted/corrupted payload with e.g. canvasWidth: 1_000_000 would make
 // DrawingCanvas try to render that many grid cells as real DOM elements,
-// hanging or crashing the tab.
-const MIN_CANVAS_DIMENSION = 2
-const MAX_CANVAS_DIMENSION = 500
+// hanging or crashing the tab. Exported so lib/serialization.ts can apply
+// the same cap while parsing the compact `?drawing=` format, rather than
+// only after this function has already built every layer/grid from it.
+export const MIN_CANVAS_DIMENSION = 2
+export const MAX_CANVAS_DIMENSION = 500
 
 function normalizeCanvasDimension(value: unknown, fallback: number): number {
   const num = typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : fallback
   return Math.max(MIN_CANVAS_DIMENSION, Math.min(MAX_CANVAS_DIMENSION, num))
 }
 
+// Matches the pixel-size slider's own range (see Controls.tsx / MobileMenu.tsx,
+// min="10" max="50"). Unbounded, a crafted payload could produce an invalid
+// or negative CSS grid track size, or (at the high end) blow up the
+// rendered/downloaded canvas's pixel dimensions independently of the
+// (already-capped) cell count.
+const MIN_PIXEL_SIZE = 10
+const MAX_PIXEL_SIZE = 50
+
+function normalizePixelSize(value: unknown): number {
+  const num = typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : 15
+  return Math.max(MIN_PIXEL_SIZE, Math.min(MAX_PIXEL_SIZE, num))
+}
+
 // A crafted payload (shared link, tampered localStorage) with an extreme
 // layer count would make compositeLayers and the layers panel iterate/render
 // that many entries on every paint - capped for the same DoS reasons as the
-// canvas dimensions above.
-const MAX_LAYERS = 50
+// canvas dimensions above. Exported for the same reason as the dimension
+// bounds - so serialization.ts can stop parsing once it's hit, rather than
+// building every layer first and only capping the result afterward.
+export const MAX_LAYERS = 50
+
+// Keeps only grid entries that are well-formed ("row,col" keys with a
+// non-empty string color) AND fall inside the canvas - without this, a
+// crafted payload could declare a small canvas but still smuggle millions
+// of "99999,99999"-style entries into a layer's grid, which compositeLayers,
+// serializeDrawing, and every localStorage save would go on retaining and
+// iterating forever even though none of them are ever visible. Bounding to
+// valid in-canvas coordinates also caps each layer at canvasWidth *
+// canvasHeight entries, since out-of-range and malformed keys are dropped.
+const GRID_KEY_PATTERN = /^(-?\d+),(-?\d+)$/
+
+function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight: number): { [key: string]: string } {
+  const grid: { [key: string]: string } = {}
+  if (!rawGrid || typeof rawGrid !== 'object') return grid
+
+  for (const [key, value] of Object.entries(rawGrid as Record<string, unknown>)) {
+    if (typeof value !== 'string' || !value) continue
+    const match = GRID_KEY_PATTERN.exec(key)
+    if (!match) continue
+    const row = Number(match[1])
+    const col = Number(match[2])
+    if (row < 0 || row >= canvasHeight || col < 0 || col >= canvasWidth) continue
+    grid[key] = value
+  }
+  return grid
+}
 
 // Normalizes any raw drawing payload - current-format (with `layers`),
 // pre-layers format (with a flat `grid`), or a partially-malformed object
@@ -84,7 +127,7 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
   const data = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
 
   const pattern = normalizePattern(data.pattern)
-  const pixelSize = typeof data.pixelSize === 'number' ? data.pixelSize : 15
+  const pixelSize = normalizePixelSize(data.pixelSize)
   const canvasWidth = normalizeCanvasDimension(data.canvasWidth, 20)
   const canvasHeight = normalizeCanvasDimension(data.canvasHeight, 20)
   const colors = (data.colors as { [key: string]: string }) || {}
@@ -92,13 +135,13 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
   let layers: Layer[]
   if (Array.isArray(data.layers) && data.layers.length > 0) {
     layers = (data.layers as Partial<Layer>[]).slice(0, MAX_LAYERS).map((layer) => ({
-      id: layer.id || createLayerId(),
-      name: layer.name || 'Layer',
+      id: typeof layer.id === 'string' && layer.id ? layer.id : createLayerId(),
+      name: typeof layer.name === 'string' && layer.name ? layer.name : 'Layer',
       visible: layer.visible !== false,
-      grid: layer.grid || {},
+      grid: normalizeLayerGrid(layer.grid, canvasWidth, canvasHeight),
     }))
   } else {
-    layers = migrateGridToLayers(data.grid as { [key: string]: string } | undefined)
+    layers = migrateGridToLayers(normalizeLayerGrid(data.grid, canvasWidth, canvasHeight))
   }
 
   const activeLayerIndex = clampActiveLayerIndex(
