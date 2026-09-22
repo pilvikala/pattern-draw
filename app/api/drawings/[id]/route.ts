@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { serializeDrawing, deserializeDrawing } from '@/lib/serialization'
+import { serializeDrawing, deserializeDrawing, MAX_COMPACT_STRING_LENGTH } from '@/lib/serialization'
 import { normalizeDrawingData } from '@/lib/layers'
 
 // GET /api/drawings/[id] - Load a specific drawing
@@ -126,6 +126,16 @@ export async function PUT(
         // Normalize before serializing - see the POST route in
         // app/api/drawings/route.ts for why this can't be skipped.
         const serialized = serializeDrawing(normalizeDrawingData(drawingData))
+
+        // Same aggregate-size guard as the POST route - see
+        // MAX_COMPACT_STRING_LENGTH's comment for why per-layer bounds alone
+        // aren't enough to guarantee a save stays loadable.
+        if (serialized.length > MAX_COMPACT_STRING_LENGTH) {
+            return NextResponse.json(
+                { error: 'Drawing is too large to save' },
+                { status: 400 }
+            )
+        }
 
         const drawing = await prisma.drawing.update({
             where: {

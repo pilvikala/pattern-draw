@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { serializeDrawing } from '@/lib/serialization'
+import { serializeDrawing, MAX_COMPACT_STRING_LENGTH } from '@/lib/serialization'
 import { normalizeDrawingData } from '@/lib/layers'
 
 // GET /api/drawings - List all drawings for the authenticated user
@@ -71,6 +71,19 @@ export async function POST(request: NextRequest) {
         // of this drawing (including this same user's own drawings list
         // and the GET route) would then have to parse back out.
         const serialized = serializeDrawing(normalizeDrawingData(drawingData))
+
+        // normalizeDrawingData bounds each layer's grid independently, but
+        // not the aggregate across all layers combined - many large-but-
+        // individually-valid layers can still serialize past what
+        // deserializeDrawing will later agree to parse back (see
+        // MAX_COMPACT_STRING_LENGTH's comment). Reject here rather than
+        // saving a drawing that can never be loaded again.
+        if (serialized.length > MAX_COMPACT_STRING_LENGTH) {
+            return NextResponse.json(
+                { error: 'Drawing is too large to save' },
+                { status: 400 }
+            )
+        }
 
         const drawing = await prisma.drawing.create({
             data: {

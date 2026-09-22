@@ -832,7 +832,8 @@ function HomeContent() {
           showToast('Drawing saved!', 'success')
         }
       } else {
-        throw new Error('Failed to save drawing')
+        const { error } = await response.json().catch(() => ({ error: undefined }))
+        throw new Error(error || 'Failed to save drawing')
       }
     } catch (error) {
       console.error('Error saving drawing:', error)
@@ -880,7 +881,8 @@ function HomeContent() {
         router.replace(`${window.location.pathname}?id=${drawing.id}`)
         showToast('Copy saved', 'success')
       } else {
-        throw new Error('Failed to save drawing copy')
+        const { error: message } = await response.json().catch(() => ({ error: undefined }))
+        throw new Error(message || 'Failed to save drawing copy')
       }
     } catch (error) {
       console.error('Error saving drawing copy:', error)

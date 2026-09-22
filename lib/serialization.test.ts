@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { serializeDrawing, deserializeDrawing, encodeDrawing, decodeDrawing, compressColor, decompressColor } from './serialization'
-import type { DrawingData } from '@/lib/types'
+import { serializeDrawing, deserializeDrawing, encodeDrawing, decodeDrawing, compressColor, decompressColor, MAX_COMPACT_STRING_LENGTH } from './serialization'
+import { normalizeDrawingData } from './layers'
+import type { DrawingData, Layer } from '@/lib/types'
 
 function drawing(overrides: Partial<DrawingData> = {}): DrawingData {
   return {
@@ -234,6 +235,52 @@ describe('decodeDrawing security bounds (compact-format path)', () => {
     expect(result!.canvasWidth).toBeLessThanOrEqual(500)
     expect(result!.canvasHeight).toBeLessThanOrEqual(500)
   })
+})
+
+describe('aggregate size across layers (save-route guard invariant)', () => {
+  it('several individually-valid layers can still serialize past MAX_COMPACT_STRING_LENGTH, and deserializeDrawing correctly refuses to load the result', () => {
+    // Each layer alone is well within normalizeDrawingData's per-layer/
+    // per-canvas bounds (500x500, well under the 50-layer cap) - normalizing
+    // has no *aggregate* bound across layers, which is exactly the gap the
+    // save API routes' explicit serialized-length check exists to catch.
+    const fullGrid = (): { [key: string]: string } => {
+      const grid: { [key: string]: string } = {}
+      for (let row = 0; row < 500; row++) {
+        for (let col = 0; col < 500; col++) {
+          grid[`${row},${col}`] = '#ff0000'
+        }
+      }
+      return grid
+    }
+    const layers: Layer[] = Array.from({ length: 5 }, (_, i) => ({
+      id: `l${i}`,
+      name: `Layer ${i}`,
+      visible: true,
+      grid: fullGrid(),
+    }))
+
+    const data = normalizeDrawingData({
+      pattern: 'squares',
+      pixelSize: 15,
+      canvasWidth: 500,
+      canvasHeight: 500,
+      colors: {},
+      layers,
+      activeLayerIndex: 0,
+    })
+    // normalizeDrawingData accepted all 5 full layers - no per-layer bound tripped.
+    expect(data.layers).toHaveLength(5)
+    expect(Object.keys(data.layers[0].grid)).toHaveLength(250_000)
+
+    const serialized = serializeDrawing(data)
+    expect(serialized.length).toBeGreaterThan(MAX_COMPACT_STRING_LENGTH)
+
+    // This is exactly what deserializeDrawing does when this drawing is
+    // later loaded back - without a save-time guard using this same
+    // serialized.length check, a "successfully saved" drawing like this one
+    // would be permanently unloadable.
+    expect(deserializeDrawing(serialized)).toBeNull()
+  }, 20000)
 })
 
 describe('decodeDrawing decompression-bomb guard', () => {

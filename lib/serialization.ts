@@ -23,7 +23,17 @@ const MAX_GRID_ENTRIES_PER_LAYER = MAX_CANVAS_DIMENSION * MAX_CANVAS_DIMENSION
 // already far beyond anything a legitimately-sized drawing needs to encode
 // (our own encodeDrawing warns well before 2,000 characters), so this is a
 // hard backstop against crafted input, not a realistic ceiling.
-const MAX_COMPACT_STRING_LENGTH = 10_000_000
+//
+// Exported so the save API routes can enforce it too: normalizeDrawingData
+// bounds each layer's grid *independently* (canvasWidth * canvasHeight
+// entries, up to MAX_LAYERS layers), but nothing bounds the *aggregate*
+// across all layers combined. A payload with many large-but-individually-
+// valid layers can therefore serialize to a string bigger than this limit -
+// the save would succeed, but deserializeDrawing would then refuse to ever
+// load it back again. The routes check serializeDrawing's actual output
+// length against this same constant before persisting, so "saved" and
+// "loadable" can't diverge.
+export const MAX_COMPACT_STRING_LENGTH = 10_000_000
 
 // Rejects an absurdly long encoded `?drawing=` value before doing any
 // base64/decompression work on it at all - a cheap first-pass filter
