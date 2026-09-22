@@ -251,10 +251,15 @@ export async function decodeDrawing(encoded: string): Promise<DrawingData | null
       decoded = atob(base64Padded)
     }
 
-    // Try compact format first
+    // Try compact format first. Routed through normalizeDrawingData just
+    // like the JSON fallback below - deserializeDrawing parses dimensions
+    // and layer count straight out of the (attacker-controlled) `?drawing=`
+    // payload with no bounds, so without this a crafted link could still
+    // smuggle e.g. a 1,000,000x1,000,000 canvas or thousands of layers
+    // straight past the limits normalizeDrawingData otherwise enforces.
     const compactData = deserializeDrawing(decoded)
     if (compactData) {
-      return compactData
+      return normalizeDrawingData(compactData)
     }
 
     // Fallback to old JSON format (pre-dates the compact format entirely)

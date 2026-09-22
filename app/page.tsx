@@ -26,18 +26,27 @@ export type { MatrixPattern, DrawingData } from '@/lib/types'
 
 // Bounds the undo stack's total memory footprint (roughly this many grid
 // cells, summed across all retained snapshots and all layers) instead of a
-// flat entry count. A flat cap of 50 doesn't scale down for large canvases
-// (or many layers) - 50 full snapshots of a 500x500 canvas is tens of
-// millions of retained cell entries, enough to exhaust a tab's memory during
-// a long drawing session.
+// flat entry count or a flat max-entries count. Either flat cap breaks down
+// once an entry's own cost changes over a session (canvas resized, layers
+// added/removed): a max-entries figure computed from just the newest entry
+// doesn't bound the total once older, differently-sized entries are mixed
+// in, and trimming only one entry per commit can leave the stack far above
+// budget for many edits while it catches up. Trimming from the oldest entry
+// until the *summed* cost of what's retained fits the budget handles both.
 const HISTORY_CELL_BUDGET = 2_000_000
-function getMaxHistoryEntries(canvasWidth: number, canvasHeight: number, layerCount: number): number {
-  const cells = canvasWidth * canvasHeight * Math.max(1, layerCount)
-  // Floor of 1 (not a larger minimum) so the budget stays meaningful for
-  // large/multi-layer canvases - a fully painted 500x500 canvas with 10
-  // layers is 2.5M cells per snapshot alone, so even a floor of 10 entries
-  // would blow far past HISTORY_CELL_BUDGET regardless of this cap.
-  return Math.max(1, Math.min(50, Math.floor(HISTORY_CELL_BUDGET / Math.max(1, cells))))
+function historyEntryCellCost(entry: HistoryEntry, canvasWidth: number, canvasHeight: number): number {
+  return canvasWidth * canvasHeight * Math.max(1, entry.layers.length)
+}
+function trimHistoryToBudget(history: HistoryEntry[], canvasWidth: number, canvasHeight: number): HistoryEntry[] {
+  const trimmed = history.slice()
+  let totalCost = trimmed.reduce((sum, entry) => sum + historyEntryCellCost(entry, canvasWidth, canvasHeight), 0)
+  // Always keep at least the most recent entry, even over budget - there
+  // must be something to undo/redo against.
+  while (trimmed.length > 1 && totalCost > HISTORY_CELL_BUDGET) {
+    totalCost -= historyEntryCellCost(trimmed[0], canvasWidth, canvasHeight)
+    trimmed.shift()
+  }
+  return trimmed
 }
 
 // A drawing shared as a URL becomes unwieldy (and risks silent truncation by
@@ -143,15 +152,12 @@ function HomeContent() {
     const currentIdx = historyIndexRef.current
     const newHistory = historyRef.current.slice(0, currentIdx + 1)
     newHistory.push({ layers: currentLayers, activeLayerIndex: activeLayerIndexRef.current })
-    const maxEntries = getMaxHistoryEntries(canvasDimsRef.current.width, canvasDimsRef.current.height, currentLayers.length)
-    if (newHistory.length > maxEntries) {
-      newHistory.shift()
-    }
-    historyRef.current = newHistory
-    const newIdx = newHistory.length - 1
+    const trimmedHistory = trimHistoryToBudget(newHistory, canvasDimsRef.current.width, canvasDimsRef.current.height)
+    historyRef.current = trimmedHistory
+    const newIdx = trimmedHistory.length - 1
     historyIndexRef.current = newIdx
     lastSavedLayersRef.current = currentLayers
-    setHistory(newHistory)
+    setHistory(trimmedHistory)
     setHistoryIndex(newIdx)
   }
 
@@ -651,23 +657,10 @@ function HomeContent() {
     if (searchParams.get('id')) {
       router.replace(window.location.pathname)
     }
-    // Add clear to history immediately (not debounced)
-    const maxHistoryEntries = getMaxHistoryEntries(canvasWidth, canvasHeight, emptyLayers.length)
-    setHistory((hist) => {
-      const currentIdx = historyIndexRef.current
-      const newHistory = hist.slice(0, currentIdx + 1)
-      newHistory.push({ layers: emptyLayers, activeLayerIndex: 0 })
-      if (newHistory.length > maxHistoryEntries) {
-        newHistory.shift()
-      }
-      const updatedHistory = newHistory
-      historyRef.current = updatedHistory
-      const newIdx = updatedHistory.length - 1
-      setHistoryIndex(newIdx)
-      historyIndexRef.current = newIdx
-      lastSavedLayersRef.current = emptyLayers
-      return updatedHistory
-    })
+    // Add clear to history immediately (not debounced). layersRef/
+    // activeLayerIndexRef are already updated above, so this pushes exactly
+    // the empty state as the new entry.
+    commitHistoryEntry()
   }
 
   const handleNewDrawingCopy = () => {
@@ -743,62 +736,18 @@ function HomeContent() {
   }
 
   const handleShare = async () => {
-    // Prefer a short, stable ?id= link whenever the drawing is already
-    // persisted - the embedded-data link below grows with every layer and
-    // painted pixel, and can run into practical URL-length limits.
-    if (currentDrawingId) {
-      // Push the current in-memory state first - otherwise a share right
-      // after unsaved edits (autosave only covers localStorage, not the
-      // server record) would hand out a link to the stale last-saved version.
-      try {
-        const response = await fetch(`/api/drawings/${currentDrawingId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ drawingData: buildDrawingData() }),
-          credentials: 'include',
-        })
-        if (!response.ok) {
-          throw new Error('Failed to sync latest changes')
-        }
-      } catch (e) {
-        console.error('Failed to sync latest changes before sharing', e)
-        showToast('Could not sync your latest changes - the shared link may be out of date.', 'error')
-      }
-      copyOrPromptUrl(`${window.location.origin}${window.location.pathname}?id=${currentDrawingId}`)
-      return
-    }
-
-    if (session?.user?.id) {
-      try {
-        const response = await fetch('/api/drawings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ drawingData: buildDrawingData() }),
-          credentials: 'include',
-        })
-        if (response.ok) {
-          const { drawing } = await response.json()
-          setCurrentDrawingId(drawing.id)
-          loadedDrawingIdRef.current = drawing.id
-          router.replace(`${window.location.pathname}?id=${drawing.id}`)
-          copyOrPromptUrl(`${window.location.origin}${window.location.pathname}?id=${drawing.id}`)
-          return
-        }
-      } catch (e) {
-        console.error('Failed to save drawing before sharing, falling back to an embedded-data link', e)
-      }
-    }
-
+    // Always the embedded-data link, never a ?id= one: GET /api/drawings/[id]
+    // requires the requester to be signed in *and* be the drawing's owner
+    // (401/403 otherwise), so an id-based link can only ever be opened by
+    // the person who shared it - useless for sharing with anyone else,
+    // which is the entire point of this button. This also always encodes
+    // the current in-memory state fresh, so there's no risk of handing out
+    // a stale previously-saved version.
     const encoded = await encodeDrawing(buildDrawingData())
     const url = `${window.location.origin}${window.location.pathname}?drawing=${encoded}`
 
     if (url.length > SAFE_SHARE_URL_LENGTH) {
-      showToast(
-        session?.user?.id
-          ? 'This drawing is too large to share as a link.'
-          : 'This drawing is too large to share as a link. Sign in to share it instead.',
-        'error'
-      )
+      showToast('This drawing is too large to share as a link.', 'error')
       return
     }
 

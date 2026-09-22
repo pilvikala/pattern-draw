@@ -141,6 +141,19 @@ describe('normalizeDrawingData', () => {
     expect(result.canvasHeight).toBe(500)
   })
 
+  it('caps an excessive layer count (denial-of-service guard)', () => {
+    const manyLayers = Array.from({ length: 500 }, (_, i) => ({
+      id: `l${i}`,
+      name: `Layer ${i}`,
+      visible: true,
+      grid: {},
+    }))
+    const result = normalizeDrawingData({ layers: manyLayers, activeLayerIndex: 499 })
+    expect(result.layers.length).toBeLessThanOrEqual(50)
+    // activeLayerIndex should still point at a real (capped) layer
+    expect(result.activeLayerIndex).toBeLessThan(result.layers.length)
+  })
+
   it('clamps an undersized or non-numeric canvas width/height to the 2 minimum', () => {
     expect(normalizeDrawingData({ canvasWidth: 0, canvasHeight: -5 }).canvasWidth).toBe(2)
     expect(normalizeDrawingData({ canvasWidth: 'huge', canvasHeight: null }).canvasWidth).toBe(20)

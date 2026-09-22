@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { serializeDrawing, deserializeDrawing, compressColor, decompressColor } from './serialization'
+import { serializeDrawing, deserializeDrawing, encodeDrawing, decodeDrawing, compressColor, decompressColor } from './serialization'
 import type { DrawingData } from '@/lib/types'
 
 function drawing(overrides: Partial<DrawingData> = {}): DrawingData {
@@ -168,5 +168,32 @@ describe('decompressColor', () => {
 
   it('should decompress a different color number to a string', () => {
     expect(decompressColor('3a6ea5')).toBe('#3a6ea5')
+  })
+})
+
+describe('decodeDrawing security bounds (compact-format path)', () => {
+  it('clamps an oversized canvas width/height smuggled through a ?drawing= link', async () => {
+    const malicious = drawing({ canvasWidth: 1_000_000, canvasHeight: 1_000_000 })
+    const encoded = await encodeDrawing(malicious)
+    const result = await decodeDrawing(encoded)
+
+    expect(result).not.toBeNull()
+    expect(result?.canvasWidth).toBeLessThanOrEqual(500)
+    expect(result?.canvasHeight).toBeLessThanOrEqual(500)
+  })
+
+  it('caps an excessive layer count smuggled through a ?drawing= link', async () => {
+    const manyLayers = Array.from({ length: 200 }, (_, i) => ({
+      id: `l${i}`,
+      name: `Layer ${i}`,
+      visible: true,
+      grid: {},
+    }))
+    const malicious = drawing({ layers: manyLayers, activeLayerIndex: 0 })
+    const encoded = await encodeDrawing(malicious)
+    const result = await decodeDrawing(encoded)
+
+    expect(result).not.toBeNull()
+    expect(result!.layers.length).toBeLessThanOrEqual(50)
   })
 })

@@ -71,6 +71,12 @@ function normalizeCanvasDimension(value: unknown, fallback: number): number {
   return Math.max(MIN_CANVAS_DIMENSION, Math.min(MAX_CANVAS_DIMENSION, num))
 }
 
+// A crafted payload (shared link, tampered localStorage) with an extreme
+// layer count would make compositeLayers and the layers panel iterate/render
+// that many entries on every paint - capped for the same DoS reasons as the
+// canvas dimensions above.
+const MAX_LAYERS = 50
+
 // Normalizes any raw drawing payload - current-format (with `layers`),
 // pre-layers format (with a flat `grid`), or a partially-malformed object
 // from localStorage/an old shared link - into a valid DrawingData.
@@ -85,7 +91,7 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
 
   let layers: Layer[]
   if (Array.isArray(data.layers) && data.layers.length > 0) {
-    layers = (data.layers as Partial<Layer>[]).map((layer) => ({
+    layers = (data.layers as Partial<Layer>[]).slice(0, MAX_LAYERS).map((layer) => ({
       id: layer.id || createLayerId(),
       name: layer.name || 'Layer',
       visible: layer.visible !== false,
