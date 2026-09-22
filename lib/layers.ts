@@ -1,4 +1,3 @@
-import { TRANSPARENT } from './types'
 import type { DrawingData, Layer, MatrixPattern } from './types'
 
 let layerIdCounter = 0
@@ -29,10 +28,6 @@ export function compositeLayers(layers: Layer[]): { [key: string]: string } {
     }
   }
   return result
-}
-
-export function getCellColor(grid: { [key: string]: string }, key: string): string {
-  return grid[key] || TRANSPARENT
 }
 
 // Migrates a pre-layers flat grid (the old single-grid drawing format) into
