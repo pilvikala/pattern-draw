@@ -104,7 +104,11 @@ export default function DrawingCanvas({
 
   const getActiveLayerPixelColor = (row: number, col: number): string => {
     const key = getPixelKey(row, col)
-    return activeLayerGrid[key] || '#ffffff'
+    // Unlike the base canvas (which sits on an opaque white "paper"), the
+    // moving-selection preview floats above the already-rendered composite,
+    // so an empty active-layer cell must stay see-through here - falling
+    // back to white would paint over whatever's on a layer beneath it.
+    return activeLayerGrid[key] || 'transparent'
   }
 
   const isInsideSelection = (row: number, col: number): boolean => {

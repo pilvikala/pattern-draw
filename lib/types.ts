@@ -41,6 +41,16 @@ export interface DrawingData {
   activeLayerIndex: number
 }
 
+// A single undo/redo snapshot. Carries activeLayerIndex alongside the layer
+// stack so undo/redo restores which layer was active at that point too, not
+// just the pixel content - otherwise a later paint after an undo could land
+// on the wrong layer (e.g. after a reorder/delete changed what's at the
+// current active index).
+export interface HistoryEntry {
+  layers: Layer[]
+  activeLayerIndex: number
+}
+
 export interface CompressedDrawingData {
   pattern: MatrixPattern
   pixelSize: number

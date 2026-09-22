@@ -42,6 +42,11 @@
   cursor: pointer;
 }
 
+.row:focus-visible {
+  outline: 2px solid #0070f3;
+  outline-offset: 1px;
+}
+
 .rowActive {
   border-color: #0070f3;
   background: #eef6ff;

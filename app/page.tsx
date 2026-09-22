@@ -15,7 +15,7 @@ import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
 import { floodFillGrid } from '@/lib/floodFill'
 import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
 import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData } from '@/lib/layers'
-import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer } from '@/lib/types'
+import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry } from '@/lib/types'
 import { TRANSPARENT } from '@/lib/types'
 import UserMenu from '@/components/UserMenu'
 import { useToast } from '@/components/ToastProvider'
@@ -74,10 +74,11 @@ function HomeContent() {
   const [showNewDrawingModal, setShowNewDrawingModal] = useState(false)
 
   // Undo/Redo history - each entry is a full snapshot of the layer stack
-  const [history, setHistory] = useState<Layer[][]>([layers])
+  // plus which layer was active at that point (see HistoryEntry).
+  const [history, setHistory] = useState<HistoryEntry[]>([{ layers, activeLayerIndex: 0 }])
   const [historyIndex, setHistoryIndex] = useState(0)
   const isUndoRedoRef = useRef(false)
-  const historyRef = useRef<Layer[][]>([layers])
+  const historyRef = useRef<HistoryEntry[]>([{ layers, activeLayerIndex: 0 }])
   const historyIndexRef = useRef(0)
   const lastSavedLayersRef = useRef<Layer[]>(layers)
   const historyDebounceTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -112,6 +113,31 @@ function HomeContent() {
     historyIndexRef.current = historyIndex
   }, [historyIndex])
 
+  // Pushes a new history entry from the current refs, synchronously. Reads
+  // and writes historyRef/historyIndexRef/lastSavedLayersRef directly rather
+  // than going through a setHistory((hist) => ...) functional updater: React
+  // Strict Mode double-invokes functional updaters in dev, and since this
+  // logic both reads and mutates refs as a side effect, a double-invocation
+  // would push two (sometimes divergent) entries for a single logical edit,
+  // corrupting undo/redo. Computing the next array as a plain value and
+  // calling setHistory(newHistory) sidesteps that entirely.
+  const commitHistoryEntry = () => {
+    const currentLayers = layersRef.current
+    const currentIdx = historyIndexRef.current
+    const newHistory = historyRef.current.slice(0, currentIdx + 1)
+    newHistory.push({ layers: currentLayers, activeLayerIndex: activeLayerIndexRef.current })
+    const maxEntries = getMaxHistoryEntries(canvasDimsRef.current.width, canvasDimsRef.current.height, currentLayers.length)
+    if (newHistory.length > maxEntries) {
+      newHistory.shift()
+    }
+    historyRef.current = newHistory
+    const newIdx = newHistory.length - 1
+    historyIndexRef.current = newIdx
+    lastSavedLayersRef.current = currentLayers
+    setHistory(newHistory)
+    setHistoryIndex(newIdx)
+  }
+
   // Function to save current layers to history (debounced).
   // The "did it change" check itself is deferred into the timeout (rather
   // than run eagerly on every call) since JSON.stringify-ing the whole layer
@@ -127,65 +153,31 @@ function HomeContent() {
       historyDebounceTimerRef.current = null
       if (isUndoRedoRef.current) return
 
-      const currentLayers = layersRef.current
-      const currentStr = JSON.stringify(currentLayers)
+      const currentStr = JSON.stringify(layersRef.current)
       const lastSavedStr = JSON.stringify(lastSavedLayersRef.current)
       if (currentStr === lastSavedStr) {
         return // No change, don't save
       }
 
-      setHistory((hist) => {
-        const currentIdx = historyIndexRef.current
-        const newHistory = hist.slice(0, currentIdx + 1)
-        newHistory.push(currentLayers)
-        const maxEntries = getMaxHistoryEntries(canvasDimsRef.current.width, canvasDimsRef.current.height, currentLayers.length)
-        if (newHistory.length > maxEntries) {
-          newHistory.shift()
-        }
-        const updatedHistory = newHistory
-        historyRef.current = updatedHistory
-        const newIdx = updatedHistory.length - 1
-        setHistoryIndex(newIdx)
-        historyIndexRef.current = newIdx
-        lastSavedLayersRef.current = currentLayers
-        return updatedHistory
-      })
+      commitHistoryEntry()
     }, 500)
   }, [])
 
   // Save current layers to history immediately (bypass debounce)
   const saveToHistoryImmediate = useCallback(() => {
-    const currentLayers = layersRef.current
-
     if (historyDebounceTimerRef.current) {
       clearTimeout(historyDebounceTimerRef.current)
       historyDebounceTimerRef.current = null
     }
 
-    const currentStr = JSON.stringify(currentLayers)
+    const currentStr = JSON.stringify(layersRef.current)
     const lastSavedStr = JSON.stringify(lastSavedLayersRef.current)
-
     if (currentStr === lastSavedStr) {
       return // No change, don't save
     }
 
     if (!isUndoRedoRef.current) {
-      setHistory((hist) => {
-        const currentIdx = historyIndexRef.current
-        const newHistory = hist.slice(0, currentIdx + 1)
-        newHistory.push(currentLayers)
-        const maxEntries = getMaxHistoryEntries(canvasDimsRef.current.width, canvasDimsRef.current.height, currentLayers.length)
-        if (newHistory.length > maxEntries) {
-          newHistory.shift()
-        }
-        const updatedHistory = newHistory
-        historyRef.current = updatedHistory
-        const newIdx = updatedHistory.length - 1
-        setHistoryIndex(newIdx)
-        historyIndexRef.current = newIdx
-        lastSavedLayersRef.current = currentLayers
-        return updatedHistory
-      })
+      commitHistoryEntry()
     }
   }, [])
 
@@ -214,7 +206,7 @@ function HomeContent() {
     activeLayerIndexRef.current = data.activeLayerIndex
     setSelection(null)
     setClipboard(null)
-    const initialHistory = [data.layers]
+    const initialHistory = [{ layers: data.layers, activeLayerIndex: data.activeLayerIndex }]
     setHistory(initialHistory)
     historyRef.current = initialHistory
     setHistoryIndex(0)
@@ -406,19 +398,25 @@ function HomeContent() {
     setSelection(rect)
   }, [])
 
-  // Applies `updater` to the active layer's grid, updates layersRef
-  // synchronously (so an immediately-following saveToHistoryImmediate/
-  // saveToHistory sees the new state), and returns the new layers array.
-  const updateActiveLayerGrid = useCallback((updater: (grid: { [key: string]: string }) => { [key: string]: string }) => {
-    setLayers((prev) => {
-      const idx = activeLayerIndexRef.current
-      const targetLayer = prev[idx]
-      if (!targetLayer) return prev
-      const newGrid = updater(targetLayer.grid)
-      const newLayers = prev.map((l, i) => (i === idx ? { ...l, grid: newGrid } : l))
-      layersRef.current = newLayers
-      return newLayers
-    })
+  // Applies `updater` to the active layer's grid. `onApplied`, if given, runs
+  // synchronously right after layersRef is updated - inside the same setState
+  // updater, since React doesn't invoke a functional setState updater
+  // synchronously at the call site. Calling e.g. saveToHistoryImmediate()
+  // right after updateActiveLayerGrid(...) returns (rather than passing it
+  // as onApplied) would race the update: layersRef.current would still hold
+  // the pre-update snapshot when the history save reads it.
+  const updateActiveLayerGrid = useCallback((
+    updater: (grid: { [key: string]: string }) => { [key: string]: string },
+    onApplied?: () => void
+  ) => {
+    const idx = activeLayerIndexRef.current
+    const targetLayer = layersRef.current[idx]
+    if (!targetLayer) return
+    const newGrid = updater(targetLayer.grid)
+    const newLayers = layersRef.current.map((l, i) => (i === idx ? { ...l, grid: newGrid } : l))
+    layersRef.current = newLayers
+    setLayers(newLayers)
+    onApplied?.()
   }, [])
 
   const handleSelectionMoveEnd = useCallback((deltaRow: number, deltaCol: number) => {
@@ -434,8 +432,7 @@ function HomeContent() {
       let newGrid = clearRectFromGrid(prev, selection)
       newGrid = pasteClipboardToGrid(newGrid, clip, newRect.startRow, newRect.startCol, canvasWidth, canvasHeight)
       return newGrid
-    })
-    saveToHistoryImmediate()
+    }, saveToHistoryImmediate)
     setSelection(newRect)
   }, [selection, canvasWidth, canvasHeight, saveToHistoryImmediate, updateActiveLayerGrid])
 
@@ -449,16 +446,14 @@ function HomeContent() {
     if (!selection) return
     const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
     setClipboard(copySelectionCells(activeGrid, selection))
-    updateActiveLayerGrid((prev) => clearRectFromGrid(prev, selection))
-    saveToHistoryImmediate()
+    updateActiveLayerGrid((prev) => clearRectFromGrid(prev, selection), saveToHistoryImmediate)
   }, [selection, saveToHistoryImmediate, updateActiveLayerGrid])
 
   const handlePaste = useCallback(() => {
     if (!clipboard) return
     const targetRow = selection ? selection.startRow : 0
     const targetCol = selection ? selection.startCol : 0
-    updateActiveLayerGrid((prev) => pasteClipboardToGrid(prev, clipboard, targetRow, targetCol, canvasWidth, canvasHeight))
-    saveToHistoryImmediate()
+    updateActiveLayerGrid((prev) => pasteClipboardToGrid(prev, clipboard, targetRow, targetCol, canvasWidth, canvasHeight), saveToHistoryImmediate)
     setTool('select')
     setSelection({
       startRow: targetRow,
@@ -470,8 +465,7 @@ function HomeContent() {
 
   const handleDeleteSelection = useCallback(() => {
     if (!selection) return
-    updateActiveLayerGrid((prev) => clearRectFromGrid(prev, selection))
-    saveToHistoryImmediate()
+    updateActiveLayerGrid((prev) => clearRectFromGrid(prev, selection), saveToHistoryImmediate)
   }, [selection, saveToHistoryImmediate, updateActiveLayerGrid])
 
   const handleDeselect = useCallback(() => {
@@ -549,15 +543,15 @@ function HomeContent() {
       const targetColor = activeGrid[key] || TRANSPARENT
       if (targetColor === color) return
 
-      updateActiveLayerGrid((prev) => floodFillGrid(prev, row, col, targetColor, color, canvasWidth, canvasHeight))
-      if (!isUndoRedoRef.current) {
-        saveToHistory()
-      }
+      updateActiveLayerGrid(
+        (prev) => floodFillGrid(prev, row, col, targetColor, color, canvasWidth, canvasHeight),
+        () => { if (!isUndoRedoRef.current) saveToHistory() }
+      )
     } else {
-      updateActiveLayerGrid((prev) => ({ ...prev, [key]: color }))
-      if (!isUndoRedoRef.current) {
-        saveToHistory()
-      }
+      updateActiveLayerGrid(
+        (prev) => ({ ...prev, [key]: color }),
+        () => { if (!isUndoRedoRef.current) saveToHistory() }
+      )
     }
   }
 
@@ -570,15 +564,18 @@ function HomeContent() {
       if (currentIdx > 0) {
         isUndoRedoRef.current = true
         const newIndex = currentIdx - 1
-        const newLayers = currentHistory[newIndex]
+        const entry = currentHistory[newIndex]
         setHistoryIndex(newIndex)
         historyIndexRef.current = newIndex
-        setLayers(newLayers)
-        layersRef.current = newLayers
-        lastSavedLayersRef.current = newLayers
-        const clampedActive = clampActiveLayerIndex(activeLayerIndexRef.current, newLayers.length)
-        setActiveLayerIndex(clampedActive)
-        activeLayerIndexRef.current = clampedActive
+        setLayers(entry.layers)
+        layersRef.current = entry.layers
+        lastSavedLayersRef.current = entry.layers
+        // Restore whichever layer was active at this point in history, not
+        // wherever the (now possibly-reordered/deleted) currently-active
+        // index happens to land - see HistoryEntry.
+        const restoredActive = clampActiveLayerIndex(entry.activeLayerIndex, entry.layers.length)
+        setActiveLayerIndex(restoredActive)
+        activeLayerIndexRef.current = restoredActive
         setSelection(null)
         setTimeout(() => {
           isUndoRedoRef.current = false
@@ -596,15 +593,15 @@ function HomeContent() {
       if (currentIdx < currentHistory.length - 1) {
         isUndoRedoRef.current = true
         const newIndex = currentIdx + 1
-        const newLayers = currentHistory[newIndex]
+        const entry = currentHistory[newIndex]
         setHistoryIndex(newIndex)
         historyIndexRef.current = newIndex
-        setLayers(newLayers)
-        layersRef.current = newLayers
-        lastSavedLayersRef.current = newLayers
-        const clampedActive = clampActiveLayerIndex(activeLayerIndexRef.current, newLayers.length)
-        setActiveLayerIndex(clampedActive)
-        activeLayerIndexRef.current = clampedActive
+        setLayers(entry.layers)
+        layersRef.current = entry.layers
+        lastSavedLayersRef.current = entry.layers
+        const restoredActive = clampActiveLayerIndex(entry.activeLayerIndex, entry.layers.length)
+        setActiveLayerIndex(restoredActive)
+        activeLayerIndexRef.current = restoredActive
         setSelection(null)
         setTimeout(() => {
           isUndoRedoRef.current = false
@@ -637,7 +634,7 @@ function HomeContent() {
     setHistory((hist) => {
       const currentIdx = historyIndexRef.current
       const newHistory = hist.slice(0, currentIdx + 1)
-      newHistory.push(emptyLayers)
+      newHistory.push({ layers: emptyLayers, activeLayerIndex: 0 })
       if (newHistory.length > maxHistoryEntries) {
         newHistory.shift()
       }
@@ -728,6 +725,23 @@ function HomeContent() {
     // persisted - the embedded-data link below grows with every layer and
     // painted pixel, and can run into practical URL-length limits.
     if (currentDrawingId) {
+      // Push the current in-memory state first - otherwise a share right
+      // after unsaved edits (autosave only covers localStorage, not the
+      // server record) would hand out a link to the stale last-saved version.
+      try {
+        const response = await fetch(`/api/drawings/${currentDrawingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ drawingData: buildDrawingData() }),
+          credentials: 'include',
+        })
+        if (!response.ok) {
+          throw new Error('Failed to sync latest changes')
+        }
+      } catch (e) {
+        console.error('Failed to sync latest changes before sharing', e)
+        showToast('Could not sync your latest changes - the shared link may be out of date.', 'error')
+      }
       copyOrPromptUrl(`${window.location.origin}${window.location.pathname}?id=${currentDrawingId}`)
       return
     }
@@ -937,63 +951,65 @@ function HomeContent() {
 
   // --- Layer management ---
 
+  // All of the handlers below compute the next layers array synchronously
+  // from layersRef.current and call setLayers(newLayers) with a plain value,
+  // rather than setLayers((prev) => {...}) with side effects inside. A
+  // functional updater gets double-invoked by React Strict Mode in dev, and
+  // since these updates carry side effects (ref writes, nested setState
+  // calls like saveToHistoryImmediate), double-invoking them would corrupt
+  // history with duplicate/divergent entries. Reading layersRef.current
+  // directly is safe here since it's always kept in sync synchronously.
+
   const handleAddLayer = useCallback(() => {
-    setLayers((prev) => {
-      const newIndex = prev.length
-      const newLayer = createLayer(`Layer ${newIndex + 1}`)
-      const newLayers = [...prev, newLayer]
-      layersRef.current = newLayers
-      setActiveLayerIndex(newIndex)
-      activeLayerIndexRef.current = newIndex
-      saveToHistoryImmediate()
-      return newLayers
-    })
+    const newIndex = layersRef.current.length
+    const newLayer = createLayer(`Layer ${newIndex + 1}`)
+    const newLayers = [...layersRef.current, newLayer]
+    layersRef.current = newLayers
+    setLayers(newLayers)
+    setActiveLayerIndex(newIndex)
+    activeLayerIndexRef.current = newIndex
     setSelection(null)
+    saveToHistoryImmediate()
   }, [saveToHistoryImmediate])
 
   const handleDeleteLayer = useCallback((id: string) => {
-    setLayers((prev) => {
-      if (prev.length <= 1) return prev
-      const deleteIndex = prev.findIndex((l) => l.id === id)
-      if (deleteIndex === -1) return prev
-      const newLayers = prev.filter((l) => l.id !== id)
-      layersRef.current = newLayers
+    const prev = layersRef.current
+    if (prev.length <= 1) return
+    const deleteIndex = prev.findIndex((l) => l.id === id)
+    if (deleteIndex === -1) return
+    const newLayers = prev.filter((l) => l.id !== id)
+    layersRef.current = newLayers
+    setLayers(newLayers)
 
-      const currentActive = activeLayerIndexRef.current
-      let newActive = currentActive
-      if (deleteIndex === currentActive) {
-        newActive = Math.max(0, deleteIndex - 1)
-      } else if (deleteIndex < currentActive) {
-        newActive = currentActive - 1
-      }
-      newActive = clampActiveLayerIndex(newActive, newLayers.length)
-      setActiveLayerIndex(newActive)
-      activeLayerIndexRef.current = newActive
+    const currentActive = activeLayerIndexRef.current
+    let newActive = currentActive
+    if (deleteIndex === currentActive) {
+      newActive = Math.max(0, deleteIndex - 1)
+    } else if (deleteIndex < currentActive) {
+      newActive = currentActive - 1
+    }
+    newActive = clampActiveLayerIndex(newActive, newLayers.length)
+    setActiveLayerIndex(newActive)
+    activeLayerIndexRef.current = newActive
 
-      saveToHistoryImmediate()
-      return newLayers
-    })
     setSelection(null)
+    saveToHistoryImmediate()
   }, [saveToHistoryImmediate])
 
   const handleRenameLayer = useCallback((id: string, name: string) => {
     const trimmed = name.trim()
     if (!trimmed) return
-    setLayers((prev) => {
-      const newLayers = prev.map((l) => (l.id === id ? { ...l, name: trimmed } : l))
-      layersRef.current = newLayers
-      saveToHistoryImmediate()
-      return newLayers
-    })
+    const newLayers = layersRef.current.map((l) => (l.id === id ? { ...l, name: trimmed } : l))
+    layersRef.current = newLayers
+    setLayers(newLayers)
+    saveToHistoryImmediate()
   }, [saveToHistoryImmediate])
 
   const handleToggleLayerVisibility = useCallback((id: string) => {
-    setLayers((prev) => {
-      const newLayers = prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l))
-      layersRef.current = newLayers
-      saveToHistoryImmediate()
-      return newLayers
-    })
+    const newLayers = layersRef.current.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l))
+    layersRef.current = newLayers
+    setLayers(newLayers)
+    saveToHistoryImmediate()
   }, [saveToHistoryImmediate])
 
   const handleSetActiveLayer = useCallback((id: string) => {
@@ -1007,60 +1023,58 @@ function HomeContent() {
   // direction: 'up' moves the layer toward the top of the stack (higher
   // array index); 'down' moves it toward the bottom.
   const handleMoveLayer = useCallback((id: string, direction: 'up' | 'down') => {
-    setLayers((prev) => {
-      const index = prev.findIndex((l) => l.id === id)
-      if (index === -1) return prev
-      const targetIndex = direction === 'up' ? index + 1 : index - 1
-      if (targetIndex < 0 || targetIndex >= prev.length) return prev
+    const prev = layersRef.current
+    const index = prev.findIndex((l) => l.id === id)
+    if (index === -1) return
+    const targetIndex = direction === 'up' ? index + 1 : index - 1
+    if (targetIndex < 0 || targetIndex >= prev.length) return
 
-      const newLayers = [...prev]
-      ;[newLayers[index], newLayers[targetIndex]] = [newLayers[targetIndex], newLayers[index]]
-      layersRef.current = newLayers
+    const newLayers = [...prev]
+    ;[newLayers[index], newLayers[targetIndex]] = [newLayers[targetIndex], newLayers[index]]
+    layersRef.current = newLayers
+    setLayers(newLayers)
 
-      if (activeLayerIndexRef.current === index) {
-        setActiveLayerIndex(targetIndex)
-        activeLayerIndexRef.current = targetIndex
-      } else if (activeLayerIndexRef.current === targetIndex) {
-        setActiveLayerIndex(index)
-        activeLayerIndexRef.current = index
-      }
+    if (activeLayerIndexRef.current === index) {
+      setActiveLayerIndex(targetIndex)
+      activeLayerIndexRef.current = targetIndex
+    } else if (activeLayerIndexRef.current === targetIndex) {
+      setActiveLayerIndex(index)
+      activeLayerIndexRef.current = index
+    }
 
-      saveToHistoryImmediate()
-      return newLayers
-    })
+    saveToHistoryImmediate()
   }, [saveToHistoryImmediate])
 
   const handleMergeLayerDown = useCallback((id: string) => {
-    setLayers((prev) => {
-      const index = prev.findIndex((l) => l.id === id)
-      if (index <= 0) return prev
-      const source = prev[index]
-      if (!source.visible) return prev
-      const target = prev[index - 1]
+    const prev = layersRef.current
+    const index = prev.findIndex((l) => l.id === id)
+    if (index <= 0) return
+    const source = prev[index]
+    if (!source.visible) return
+    const target = prev[index - 1]
 
-      const mergedGrid = { ...target.grid }
-      for (const key in source.grid) {
-        const color = source.grid[key]
-        if (color) mergedGrid[key] = color
-      }
+    const mergedGrid = { ...target.grid }
+    for (const key in source.grid) {
+      const color = source.grid[key]
+      if (color) mergedGrid[key] = color
+    }
 
-      const newLayers = prev
-        .filter((_, i) => i !== index)
-        .map((l) => (l.id === target.id ? { ...target, grid: mergedGrid } : l))
-      layersRef.current = newLayers
+    const newLayers = prev
+      .filter((_, i) => i !== index)
+      .map((l) => (l.id === target.id ? { ...target, grid: mergedGrid } : l))
+    layersRef.current = newLayers
+    setLayers(newLayers)
 
-      const prevActive = activeLayerIndexRef.current
-      const newActive = clampActiveLayerIndex(
-        prevActive === index ? index - 1 : prevActive > index ? prevActive - 1 : prevActive,
-        newLayers.length
-      )
-      setActiveLayerIndex(newActive)
-      activeLayerIndexRef.current = newActive
+    const prevActive = activeLayerIndexRef.current
+    const newActive = clampActiveLayerIndex(
+      prevActive === index ? index - 1 : prevActive > index ? prevActive - 1 : prevActive,
+      newLayers.length
+    )
+    setActiveLayerIndex(newActive)
+    activeLayerIndexRef.current = newActive
 
-      saveToHistoryImmediate()
-      return newLayers
-    })
     setSelection(null)
+    saveToHistoryImmediate()
   }, [saveToHistoryImmediate])
 
   const layersPanelProps = {

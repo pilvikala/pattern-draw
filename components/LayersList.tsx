@@ -65,6 +65,15 @@ export default function LayersList({
               key={layer.id}
               className={`${styles.row} ${isActive ? styles.rowActive : ''}`}
               onClick={() => onSelectLayer(layer.id)}
+              role="button"
+              tabIndex={0}
+              aria-pressed={isActive}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onSelectLayer(layer.id)
+                }
+              }}
             >
               <button
                 className={styles.visibilityToggle}
