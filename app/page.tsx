@@ -33,12 +33,29 @@ export type { MatrixPattern, DrawingData } from '@/lib/types'
 const HISTORY_CELL_BUDGET = 2_000_000
 function getMaxHistoryEntries(canvasWidth: number, canvasHeight: number, layerCount: number): number {
   const cells = canvasWidth * canvasHeight * Math.max(1, layerCount)
-  return Math.max(10, Math.min(50, Math.floor(HISTORY_CELL_BUDGET / Math.max(1, cells))))
+  // Floor of 1 (not a larger minimum) so the budget stays meaningful for
+  // large/multi-layer canvases - a fully painted 500x500 canvas with 10
+  // layers is 2.5M cells per snapshot alone, so even a floor of 10 entries
+  // would blow far past HISTORY_CELL_BUDGET regardless of this cap.
+  return Math.max(1, Math.min(50, Math.floor(HISTORY_CELL_BUDGET / Math.max(1, cells))))
 }
 
 // A drawing shared as a URL becomes unwieldy (and risks silent truncation by
 // chat apps, SMS, older proxies, etc.) past roughly this many characters.
 const SAFE_SHARE_URL_LENGTH = 2000
+
+// Prisma's default cuid() ids are alphanumeric; this is intentionally a bit
+// more permissive (covers uuid/nanoid too) while still rejecting anything
+// that could act as a path segment other than a plain opaque id - notably
+// '/', '.', and whitespace. The `?id=` query param is attacker-controlled
+// (an attacker can craft and share a link), and it's interpolated directly
+// into `/api/drawings/${id}` fetch URLs, so an unvalidated value like
+// `../../auth/signout` would resolve (browsers normalize '..' in fetch
+// URLs) to a request against a completely different same-origin endpoint.
+const DRAWING_ID_PATTERN = /^[a-zA-Z0-9_-]+$/
+function isValidDrawingId(id: string): boolean {
+  return DRAWING_ID_PATTERN.test(id)
+}
 
 function HomeContent() {
   const { data: session } = useSession()
@@ -260,6 +277,11 @@ function HomeContent() {
   // to the session actually becoming available or the id actually changing.
   useEffect(() => {
     const drawingId = searchParams.get('id')
+    if (drawingId && !isValidDrawingId(drawingId)) {
+      console.error('Ignoring malformed ?id= drawing parameter')
+      router.replace(window.location.pathname)
+      return
+    }
     if (drawingId && session?.user?.id && loadedDrawingIdRef.current !== drawingId) {
       loadedDrawingIdRef.current = drawingId
       const loadDrawing = async () => {

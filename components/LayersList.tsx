@@ -64,23 +64,10 @@ export default function LayersList({
             <li
               key={layer.id}
               className={`${styles.row} ${isActive ? styles.rowActive : ''}`}
-              onClick={() => onSelectLayer(layer.id)}
-              role="button"
-              tabIndex={0}
-              aria-pressed={isActive}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  onSelectLayer(layer.id)
-                }
-              }}
             >
               <button
                 className={styles.visibilityToggle}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onToggleVisibility(layer.id)
-                }}
+                onClick={() => onToggleVisibility(layer.id)}
                 aria-label={layer.visible ? 'Hide layer' : 'Show layer'}
                 title={layer.visible ? 'Hide layer' : 'Show layer'}
               >
@@ -102,7 +89,6 @@ export default function LayersList({
                   className={styles.nameInput}
                   value={editingName}
                   autoFocus
-                  onClick={(e) => e.stopPropagation()}
                   onChange={(e) => setEditingName(e.target.value)}
                   onBlur={commitEditing}
                   onKeyDown={(e) => {
@@ -111,26 +97,28 @@ export default function LayersList({
                   }}
                 />
               ) : (
-                <span
+                // A dedicated button (not the <li>) carries selection, so it
+                // doesn't nest inside another interactive element and its
+                // own Enter/Space/click semantics come for free - no custom
+                // key handling needed, and no bubbling conflicts with the
+                // sibling buttons below.
+                <button
+                  type="button"
                   className={styles.name}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation()
-                    startEditing(layer)
-                  }}
+                  onClick={() => onSelectLayer(layer.id)}
+                  onDoubleClick={() => startEditing(layer)}
+                  aria-pressed={isActive}
                   title="Double-click to rename"
                 >
                   {layer.name}
-                </span>
+                </button>
               )}
 
               <div className={styles.rowActions}>
                 <button
                   className={styles.iconButton}
                   disabled={!canMoveUp}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onMoveLayer(layer.id, 'up')
-                  }}
+                  onClick={() => onMoveLayer(layer.id, 'up')}
                   aria-label="Move layer up"
                   title="Move layer up"
                 >
@@ -139,10 +127,7 @@ export default function LayersList({
                 <button
                   className={styles.iconButton}
                   disabled={!canMoveDown}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onMoveLayer(layer.id, 'down')
-                  }}
+                  onClick={() => onMoveLayer(layer.id, 'down')}
                   aria-label="Move layer down"
                   title="Move layer down"
                 >
@@ -151,10 +136,7 @@ export default function LayersList({
                 <button
                   className={styles.iconButton}
                   disabled={!canMergeDown}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onMergeDown(layer.id)
-                  }}
+                  onClick={() => onMergeDown(layer.id)}
                   aria-label="Merge down"
                   title="Merge into layer below"
                 >
@@ -163,10 +145,7 @@ export default function LayersList({
                 <button
                   className={`${styles.iconButton} ${styles.deleteButton}`}
                   disabled={!canDelete}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onDeleteLayer(layer.id)
-                  }}
+                  onClick={() => onDeleteLayer(layer.id)}
                   aria-label="Delete layer"
                   title="Delete layer"
                 >

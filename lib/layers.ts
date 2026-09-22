@@ -46,16 +46,41 @@ export function clampActiveLayerIndex(index: number, layerCount: number): number
   return Math.max(0, Math.min(index, layerCount - 1))
 }
 
+const VALID_PATTERNS: MatrixPattern[] = ['squares', 'bricks', 'bricksVertical']
+
+// Validates against the three known literals rather than casting - an
+// unrecognized value (malformed localStorage, a hand-edited shared link)
+// would otherwise silently corrupt serializeDrawing's pattern encoding,
+// which treats anything that isn't exactly 'squares' or 'bricks' as
+// 'bricksVertical'.
+function normalizePattern(value: unknown): MatrixPattern {
+  return VALID_PATTERNS.includes(value as MatrixPattern) ? (value as MatrixPattern) : 'squares'
+}
+
+// Matches the bounds the canvas-size form itself enforces (see
+// handleSetCanvasSize in app/page.tsx). A drawing loaded from a shared link
+// or localStorage bypasses that form entirely, so without clamping here a
+// crafted/corrupted payload with e.g. canvasWidth: 1_000_000 would make
+// DrawingCanvas try to render that many grid cells as real DOM elements,
+// hanging or crashing the tab.
+const MIN_CANVAS_DIMENSION = 2
+const MAX_CANVAS_DIMENSION = 500
+
+function normalizeCanvasDimension(value: unknown, fallback: number): number {
+  const num = typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : fallback
+  return Math.max(MIN_CANVAS_DIMENSION, Math.min(MAX_CANVAS_DIMENSION, num))
+}
+
 // Normalizes any raw drawing payload - current-format (with `layers`),
 // pre-layers format (with a flat `grid`), or a partially-malformed object
 // from localStorage/an old shared link - into a valid DrawingData.
 export function normalizeDrawingData(raw: unknown): DrawingData {
   const data = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
 
-  const pattern = (data.pattern as MatrixPattern) || 'squares'
+  const pattern = normalizePattern(data.pattern)
   const pixelSize = typeof data.pixelSize === 'number' ? data.pixelSize : 15
-  const canvasWidth = typeof data.canvasWidth === 'number' ? data.canvasWidth : 20
-  const canvasHeight = typeof data.canvasHeight === 'number' ? data.canvasHeight : 20
+  const canvasWidth = normalizeCanvasDimension(data.canvasWidth, 20)
+  const canvasHeight = normalizeCanvasDimension(data.canvasHeight, 20)
   const colors = (data.colors as { [key: string]: string }) || {}
 
   let layers: Layer[]

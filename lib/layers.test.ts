@@ -124,6 +124,28 @@ describe('normalizeDrawingData', () => {
     expect(result.layers[0].grid).toEqual({})
   })
 
+  it('falls back to squares for an invalid pattern value instead of passing it through', () => {
+    const result = normalizeDrawingData({ pattern: 'not-a-real-pattern' })
+    expect(result.pattern).toBe('squares')
+  })
+
+  it('accepts each valid pattern literal', () => {
+    expect(normalizeDrawingData({ pattern: 'squares' }).pattern).toBe('squares')
+    expect(normalizeDrawingData({ pattern: 'bricks' }).pattern).toBe('bricks')
+    expect(normalizeDrawingData({ pattern: 'bricksVertical' }).pattern).toBe('bricksVertical')
+  })
+
+  it('clamps an oversized canvas width/height to the 500 max (denial-of-service guard)', () => {
+    const result = normalizeDrawingData({ canvasWidth: 1_000_000, canvasHeight: 999_999 })
+    expect(result.canvasWidth).toBe(500)
+    expect(result.canvasHeight).toBe(500)
+  })
+
+  it('clamps an undersized or non-numeric canvas width/height to the 2 minimum', () => {
+    expect(normalizeDrawingData({ canvasWidth: 0, canvasHeight: -5 }).canvasWidth).toBe(2)
+    expect(normalizeDrawingData({ canvasWidth: 'huge', canvasHeight: null }).canvasWidth).toBe(20)
+  })
+
   it('clamps an out-of-range activeLayerIndex', () => {
     const raw = {
       layers: [
