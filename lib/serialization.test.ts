@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { serializeDrawing, deserializeDrawing, encodeDrawing, decodeDrawing, compressColor, decompressColor, MAX_COMPACT_STRING_LENGTH, parseCappedColorList, MAX_COLOR_LIST_ENTRIES, MAX_PAINTED_COLOR_LIST_ENTRIES } from './serialization'
+import { serializeDrawing, deserializeDrawing, encodeDrawing, decodeDrawing, compressColor, decompressColor, MAX_COMPACT_STRING_LENGTH, parseCappedColorList, MAX_COLOR_LIST_ENTRIES, MAX_PAINTED_COLOR_LIST_ENTRIES, readBoundedRequestBody, MAX_REQUEST_BODY_BYTES } from './serialization'
 import { normalizeDrawingData } from './layers'
 import type { DrawingData, Layer } from '@/lib/types'
 
@@ -462,5 +462,33 @@ describe('decodeDrawing decompression-bomb guard', () => {
 
     const result = await decodeDrawing(base64url)
     expect(result).toBeNull()
+  })
+})
+
+describe('readBoundedRequestBody', () => {
+  it('rejects a request body larger than MAX_REQUEST_BODY_BYTES', async () => {
+    // Streamed in several chunks (not one huge allocation) so this also
+    // exercises the incremental-cancel path rather than just a size check
+    // on an already-fully-buffered body.
+    const chunkSize = 10 * 1024 * 1024
+    const chunkCount = Math.ceil(MAX_REQUEST_BODY_BYTES / chunkSize) + 1
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < chunkCount; i++) {
+          controller.enqueue(new Uint8Array(chunkSize))
+        }
+        controller.close()
+      },
+    })
+    const request = new Request('http://localhost/test', { method: 'POST', body, duplex: 'half' } as RequestInit)
+    const result = await readBoundedRequestBody(request)
+    expect(result).toBeNull()
+  })
+
+  it('reads a normal-sized request body correctly', async () => {
+    const text = JSON.stringify({ drawingData: { pattern: 'squares' } })
+    const request = new Request('http://localhost/test', { method: 'POST', body: text })
+    const result = await readBoundedRequestBody(request)
+    expect(result).toBe(text)
   })
 })

@@ -64,6 +64,18 @@ export function parseCappedColorList(raw: string | undefined, limit: number = MA
 // "loadable" can't diverge.
 export const MAX_COMPACT_STRING_LENGTH = 10_000_000
 
+// The save API routes previously called `request.json()` directly, which
+// buffers and parses the *entire* client-supplied body in memory before
+// normalizeDrawingData or any other bound ever runs - a request with a huge
+// body (regardless of what JSON shape it eventually parses to, or fails to)
+// costs that memory/CPU up front, unprotected by any bound downstream.
+// Generous relative to the post-normalization MAX_TOTAL_GRID_ENTRIES cap in
+// lib/layers.ts (2,000,000 cells, each needing well under 25 bytes of raw
+// JSON) so this never rejects a payload that would otherwise be accepted -
+// it only guards against a request many times larger than any drawing the
+// save routes would actually persist.
+export const MAX_REQUEST_BODY_BYTES = 50 * 1024 * 1024
+
 // Rejects an absurdly long encoded `?drawing=` value before doing any
 // base64/decompression work on it at all - a cheap first-pass filter
 // independent of the decompression-bomb guard below.
@@ -82,7 +94,9 @@ const MAX_ENCODED_LENGTH = 20_000_000
 // independently-tunable number that could silently drift from it.
 const MAX_DECOMPRESSED_BYTES = MAX_COMPACT_STRING_LENGTH
 
-async function readStreamBounded(readable: ReadableStream<Uint8Array>, maxBytes: number): Promise<Uint8Array | null> {
+// Exported so the API routes can bound their request bodies too - see the
+// comment on MAX_REQUEST_BODY_BYTES below.
+export async function readStreamBounded(readable: ReadableStream<Uint8Array>, maxBytes: number): Promise<Uint8Array | null> {
   const reader = readable.getReader()
   const chunks: Uint8Array[] = []
   let total = 0
@@ -108,6 +122,18 @@ async function readStreamBounded(readable: ReadableStream<Uint8Array>, maxBytes:
     offset += chunk.length
   }
   return result
+}
+
+// Reads a Request's body incrementally, bounded by MAX_REQUEST_BODY_BYTES,
+// instead of the API routes calling `request.json()` directly - which
+// buffers and parses the entire client-supplied body before
+// normalizeDrawingData or any other bound downstream ever runs. Returns
+// null if the body exceeds the limit; the caller decides the response.
+export async function readBoundedRequestBody(request: Request): Promise<string | null> {
+  if (!request.body) return ''
+  const bytes = await readStreamBounded(request.body, MAX_REQUEST_BODY_BYTES)
+  if (!bytes) return null
+  return new TextDecoder().decode(bytes)
 }
 
 /**

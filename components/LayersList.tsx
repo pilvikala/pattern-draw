@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { Layer } from '@/lib/types'
 import styles from './LayersList.module.css'
 
@@ -31,16 +31,34 @@ export default function LayersList({
 }: LayersListProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
+  // Setting editingId to null unmounts the input; if unmounting a focused
+  // element ever fires its onBlur (browser-dependent), that blur would call
+  // commitEditing via the same closure that was active while editing -
+  // still holding the pre-cancel editingId/editingName - and commit the
+  // rename Escape was meant to discard. This flag lets commitEditing tell
+  // "cancelled" apart from "blurred/Enter while actively editing" and skip
+  // the rename in the former case. Reset in startEditing (not by
+  // commitEditing itself) so it doesn't depend on blur actually firing,
+  // which isn't reliable across browsers for this unmount-on-state-change
+  // pattern - each new editing session simply starts with a clean flag.
+  const isCancellingRef = useRef(false)
 
   const startEditing = (layer: Layer) => {
+    isCancellingRef.current = false
     setEditingId(layer.id)
     setEditingName(layer.name)
   }
 
   const commitEditing = () => {
+    if (isCancellingRef.current) return
     if (editingId) {
       onRenameLayer(editingId, editingName)
     }
+    setEditingId(null)
+  }
+
+  const cancelEditing = () => {
+    isCancellingRef.current = true
     setEditingId(null)
   }
 
@@ -101,7 +119,7 @@ export default function LayersList({
                   onBlur={commitEditing}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') commitEditing()
-                    if (e.key === 'Escape') setEditingId(null)
+                    if (e.key === 'Escape') cancelEditing()
                   }}
                 />
               ) : (

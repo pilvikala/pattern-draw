@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { serializeDrawing, MAX_COMPACT_STRING_LENGTH } from '@/lib/serialization'
+import { serializeDrawing, MAX_COMPACT_STRING_LENGTH, readBoundedRequestBody } from '@/lib/serialization'
 import { normalizeDrawingData, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
 
 // GET /api/drawings - List all drawings for the authenticated user
@@ -53,8 +53,29 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        const body = await request.json()
-        const { drawingData } = body
+        // Read the body with a byte budget before parsing it as JSON -
+        // request.json() would buffer and parse the entire client-supplied
+        // body in memory regardless of size, unprotected by any bound
+        // downstream (normalizeDrawingData included).
+        const bodyText = await readBoundedRequestBody(request)
+        if (bodyText === null) {
+            return NextResponse.json(
+                { error: 'Request body is too large' },
+                { status: 413 }
+            )
+        }
+
+        let body: unknown
+        try {
+            body = JSON.parse(bodyText)
+        } catch {
+            return NextResponse.json(
+                { error: 'Invalid JSON body' },
+                { status: 400 }
+            )
+        }
+
+        const { drawingData } = (body && typeof body === 'object' ? body : {}) as { drawingData?: unknown }
 
         if (!drawingData) {
             return NextResponse.json(

@@ -296,7 +296,14 @@ function HomeContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, session])
 
-  const buildDrawingData = useCallback((): DrawingData => ({
+  // Normalized before returning - the color text input (ColorPicker) takes
+  // arbitrary typed text with no validation, so `selectedColor` (and
+  // through it, painted cells) can hold a non-hex string. Every consumer of
+  // this snapshot (localStorage, share-link encoding, API saves) needs the
+  // same bounded/validated shape share and reload already get via
+  // normalizeDrawingData - without this, a share link or localStorage save
+  // could embed an invalid color that a later load then silently drops.
+  const buildDrawingData = useCallback((): DrawingData => normalizeDrawingData({
     pattern,
     pixelSize,
     canvasWidth,
