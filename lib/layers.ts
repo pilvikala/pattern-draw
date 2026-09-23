@@ -245,6 +245,24 @@ function normalizeColors(rawColors: unknown): { [key: string]: string } {
   return colors
 }
 
+// The top-level keys normalizeDrawingData actually reads (current-format,
+// legacy pre-layers format, or any partial subset of either - every field
+// has a safe default, so a payload only needs to carry one of these to be
+// recognizably drawing-shaped).
+const DRAWING_DATA_KEYS = ['pattern', 'pixelSize', 'canvasWidth', 'canvasHeight', 'colors', 'layers', 'grid', 'activeLayerIndex']
+
+// A non-array object with none of these keys (e.g. `{}` or `{ foo: 1 }`)
+// still passes normalizeDrawingData unrejected - every field falls back to
+// a default - and produces a valid-looking blank drawing. Callers that are
+// about to persist the result (the save API routes) need to tell "this is
+// actually drawing data" apart from "this is some other truthy object" so
+// a malformed request can't silently overwrite existing data with an empty
+// drawing instead of failing.
+export function isDrawingDataShaped(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return DRAWING_DATA_KEYS.some((key) => key in value)
+}
+
 // Normalizes any raw drawing payload - current-format (with `layers`),
 // pre-layers format (with a flat `grid`), or a partially-malformed object
 // from localStorage/an old shared link - into a valid DrawingData.

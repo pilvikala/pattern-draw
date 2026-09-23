@@ -7,6 +7,7 @@ import {
   clampActiveLayerIndex,
   mergeLayerDown,
   totalGridEntryCount,
+  isDrawingDataShaped,
 } from './layers'
 import type { Layer } from './types'
 
@@ -523,5 +524,30 @@ describe('totalGridEntryCount', () => {
   it('returns 0 for a drawing with no painted cells', () => {
     const data = normalizeDrawingData({ layers: [{ id: 'a', name: 'Layer 1', visible: true, grid: {} }] })
     expect(totalGridEntryCount(data)).toBe(0)
+  })
+})
+
+describe('isDrawingDataShaped', () => {
+  it('accepts an object with at least one recognized drawing field', () => {
+    expect(isDrawingDataShaped({ pattern: 'squares' })).toBe(true)
+    expect(isDrawingDataShaped({ layers: [] })).toBe(true)
+    expect(isDrawingDataShaped({ grid: {} })).toBe(true)
+    expect(isDrawingDataShaped({ canvasWidth: 20, unrelatedJunk: true })).toBe(true)
+  })
+
+  it('rejects primitives, arrays, and objects with no recognized fields', () => {
+    // The exact malformed-but-truthy shapes normalizeDrawingData would
+    // otherwise silently accept as "just an empty/default drawing" -
+    // a save request carrying one of these should be rejected with 400
+    // instead of overwriting existing data with a blank drawing.
+    expect(isDrawingDataShaped('bad')).toBe(false)
+    expect(isDrawingDataShaped(42)).toBe(false)
+    expect(isDrawingDataShaped(true)).toBe(false)
+    expect(isDrawingDataShaped(null)).toBe(false)
+    expect(isDrawingDataShaped(undefined)).toBe(false)
+    expect(isDrawingDataShaped([])).toBe(false)
+    expect(isDrawingDataShaped([{ pattern: 'squares' }])).toBe(false)
+    expect(isDrawingDataShaped({})).toBe(false)
+    expect(isDrawingDataShaped({ foo: 1, bar: 2 })).toBe(false)
   })
 })

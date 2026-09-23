@@ -640,6 +640,13 @@ export default function DrawingCanvas({
     // can tell whether to let it take over from the dragged color.
     const getAboveActiveLayerPixelColor = (row: number, col: number): string | undefined =>
       dragComposites.above[getPixelKey(row, col)]
+    // compositeLayers skips hidden layers everywhere else (the base canvas,
+    // export, dragComposites itself) - the floating preview needs the same
+    // rule, since the UI allows selecting and dragging a hidden layer's
+    // content. Without this, every captured active-layer cell still paints
+    // onto the floating canvas regardless of visibility, briefly exposing
+    // pixels that are supposed to be invisible everywhere else.
+    const isActiveLayerHidden = layers[activeLayerIndex]?.visible === false
 
     // The backing store is one pixel per cell (not pixelSize per cell) and
     // scaled up to the on-screen size via CSS instead - at the maximum
@@ -675,7 +682,11 @@ export default function DrawingCanvas({
           // result instead.
           const destRow = selection.startRow + r + moveDelta.dRow
           const destCol = selection.startCol + c + moveDelta.dCol
-          if (color === 'transparent') {
+          // A hidden active layer contributes nothing to the visible
+          // composite regardless of what it actually has painted there -
+          // same treatment as a transparent cell, whether or not this one
+          // has real content.
+          if (isActiveLayerHidden || color === 'transparent') {
             floatingCtx.fillStyle = getBelowActiveLayerPixelColor(destRow, destCol)
           } else {
             // A layer above the active one keeps covering this cell after

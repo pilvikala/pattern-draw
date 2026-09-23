@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { serializeDrawing, MAX_COMPACT_STRING_LENGTH, readBoundedRequestBody } from '@/lib/serialization'
-import { normalizeDrawingData, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
+import { normalizeDrawingData, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES, isDrawingDataShaped } from '@/lib/layers'
 
 // GET /api/drawings - List all drawings for the authenticated user
 export async function GET(request: NextRequest) {
@@ -77,12 +77,13 @@ export async function POST(request: NextRequest) {
 
         const { drawingData } = (body && typeof body === 'object' ? body : {}) as { drawingData?: unknown }
 
-        // normalizeDrawingData treats any non-object (a string, number,
-        // array, etc.) as "no data" and falls back to a blank drawing
-        // rather than rejecting it - a truthy-but-wrong-shaped drawingData
-        // (e.g. `{ drawingData: "bad" }`) would otherwise pass this check
-        // and silently create an empty drawing instead of returning 400.
-        if (!drawingData || typeof drawingData !== 'object' || Array.isArray(drawingData)) {
+        // normalizeDrawingData falls back every field to a default rather
+        // than rejecting unrecognized input, so a truthy-but-wrong-shaped
+        // drawingData (a string, an array, or an object with none of the
+        // expected drawing fields, e.g. `{ drawingData: "bad" }` or `{}`)
+        // would otherwise pass this check and silently create an empty
+        // drawing instead of returning 400.
+        if (!isDrawingDataShaped(drawingData)) {
             return NextResponse.json(
                 { error: 'Drawing data is required' },
                 { status: 400 }
