@@ -77,7 +77,12 @@ export async function POST(request: NextRequest) {
 
         const { drawingData } = (body && typeof body === 'object' ? body : {}) as { drawingData?: unknown }
 
-        if (!drawingData) {
+        // normalizeDrawingData treats any non-object (a string, number,
+        // array, etc.) as "no data" and falls back to a blank drawing
+        // rather than rejecting it - a truthy-but-wrong-shaped drawingData
+        // (e.g. `{ drawingData: "bad" }`) would otherwise pass this check
+        // and silently create an empty drawing instead of returning 400.
+        if (!drawingData || typeof drawingData !== 'object' || Array.isArray(drawingData)) {
             return NextResponse.json(
                 { error: 'Drawing data is required' },
                 { status: 400 }

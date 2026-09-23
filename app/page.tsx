@@ -319,7 +319,18 @@ function HomeContent() {
   // Save function that can be called manually - memoized with useCallback
   const saveToLocalStorage = useCallback(() => {
     try {
-      localStorage.setItem('pattern-draw-data', JSON.stringify(buildDrawingData()))
+      const data = buildDrawingData()
+      // Same aggregate cap as the API/share-link paths (see
+      // MAX_TOTAL_GRID_ENTRIES's comment) - without it, a drawing near the
+      // editor's own per-layer limits (50 layers, 500x500) would get
+      // JSON.stringified and written to localStorage on every debounced
+      // edit, which can block the main thread and repeatedly exceed the
+      // browser's per-origin storage quota. This autosave is a passive
+      // recovery mechanism, not a user-initiated save, so it skips
+      // silently rather than surfacing an error for something the user
+      // didn't explicitly ask for.
+      if (totalGridEntryCount(data) > MAX_TOTAL_GRID_ENTRIES) return
+      localStorage.setItem('pattern-draw-data', JSON.stringify(data))
     } catch (e) {
       console.error('Failed to save to localStorage', e)
     }
