@@ -11,6 +11,13 @@ export default function LayersDrawer(props: LayersListProps) {
   const triggerButtonRef = useRef<HTMLButtonElement>(null)
   const drawerRef = useRef<HTMLDivElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
+  // Effects run on mount too, with no prior value to compare against - so
+  // an isOpen-keyed effect can't on its own tell "the drawer just closed"
+  // apart from "the component just mounted, and isOpen happens to be
+  // false". Without this, focus-restoration below would fire on every
+  // initial page load (isOpen starts false) and steal focus to the Layers
+  // trigger button even though the user never opened the drawer.
+  const wasOpenRef = useRef(false)
 
   // Modal focus contract: move focus into the drawer when it opens, restore
   // it to the button that opened it when it closes - without this, a
@@ -19,9 +26,10 @@ export default function LayersDrawer(props: LayersListProps) {
   useEffect(() => {
     if (isOpen) {
       closeButtonRef.current?.focus()
-    } else {
+    } else if (wasOpenRef.current) {
       triggerButtonRef.current?.focus()
     }
+    wasOpenRef.current = isOpen
   }, [isOpen])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

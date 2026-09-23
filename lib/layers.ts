@@ -133,16 +133,18 @@ export const MAX_LAYERS = 50
 // canvasHeight entries, since out-of-range and malformed keys are dropped.
 const GRID_KEY_PATTERN = /^(-?\d+),(-?\d+)$/
 
-// A raw grid crafted entirely (or mostly) out of malformed/out-of-bounds
-// keys never grows `count` past canvasWidth*canvasHeight, so that check
-// alone can't stop for...in from still walking every one of them - a
-// payload of, say, 5,000,000 "99999,99999"-style keys costs a full linear
-// scan regardless of how few (or none) turn out valid. This second, raw
-// counter bounds the scan itself, independent of how many entries pass.
-// Generous relative to any real drawing's needs (canvasWidth*canvasHeight
-// tops out at MAX_CANVAS_DIMENSION^2 = 250,000) so it only ever kicks in
-// for a payload with drastically more raw keys than valid cells.
-const MAX_RAW_GRID_ENTRIES_TO_SCAN = 1_000_000
+// Shared by normalizeLayerGrid and normalizeColors below: an accepted-entry
+// counter alone can't bound a for...in scan when the payload is crafted
+// entirely (or mostly) out of entries that never get accepted (malformed/
+// out-of-bounds grid keys, non-string/empty color values) - that counter
+// never reaches its cap, so for...in still walks every one of potentially
+// millions of raw keys regardless of how few (or none) turn out valid. This
+// second, independent counter bounds the scan itself. Generous relative to
+// any real drawing's needs (canvasWidth*canvasHeight tops out at
+// MAX_CANVAS_DIMENSION^2 = 250,000; MAX_SAVED_COLORS is 200) so it only
+// ever kicks in for a payload with drastically more raw keys than valid
+// entries.
+const MAX_RAW_ENTRIES_TO_SCAN = 1_000_000
 
 function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight: number): { [key: string]: string } {
   const grid: { [key: string]: string } = {}
@@ -159,7 +161,7 @@ function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight:
   let count = 0
   let scanned = 0
   for (const key in record) {
-    if (count >= maxEntries || scanned >= MAX_RAW_GRID_ENTRIES_TO_SCAN) break
+    if (count >= maxEntries || scanned >= MAX_RAW_ENTRIES_TO_SCAN) break
     scanned++
     if (!Object.prototype.hasOwnProperty.call(record, key)) continue
     const value = record[key]
@@ -205,13 +207,19 @@ function normalizeColors(rawColors: unknown): { [key: string]: string } {
   if (!rawColors || typeof rawColors !== 'object') return colors
   const record = rawColors as Record<string, unknown>
   let count = 0
+  let scanned = 0
   // for...in (with its own hasOwnProperty check) visits properties one at a
   // time instead of materializing an array of every key/entry up front like
   // Object.entries/Object.keys would - the only way the break below can
   // actually stop a crafted payload with millions of color entries from
-  // paying that allocation cost before this cap ever applies.
+  // paying that allocation cost before this cap ever applies. `count` only
+  // grows on an *accepted* entry, so a payload crafted entirely out of
+  // null/non-string/empty values would never reach MAX_SAVED_COLORS on its
+  // own - `scanned` bounds the raw walk itself regardless of how many
+  // entries turn out valid, same as normalizeLayerGrid's `scanned`.
   for (const key in record) {
-    if (count >= MAX_SAVED_COLORS) break
+    if (count >= MAX_SAVED_COLORS || scanned >= MAX_RAW_ENTRIES_TO_SCAN) break
+    scanned++
     if (!Object.prototype.hasOwnProperty.call(record, key)) continue
     const value = record[key]
     if (typeof value === 'string' && value) {

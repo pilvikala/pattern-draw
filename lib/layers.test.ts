@@ -450,6 +450,20 @@ describe('normalizeDrawingData', () => {
     expect(result.colors['199']).toBe('#00ff00')
   })
 
+  it('bounds the raw colors scan itself when the payload is almost entirely invalid values', () => {
+    // The accepted-entry counter alone never reaches MAX_SAVED_COLORS when
+    // every value is null/non-string/empty, so it can't stop for...in from
+    // still walking every one of potentially millions of entries - a
+    // separate raw-scan cap is needed, mirroring normalizeLayerGrid's fix.
+    // This proves that cap is enforced: a valid entry placed after the scan
+    // limit is never reached and is silently dropped.
+    const manyColors: Record<string, unknown> = {}
+    for (let i = 0; i < 1_000_000; i++) manyColors[`bad-${i}`] = i // never a string
+    manyColors['valid'] = '#00ff00' // valid, but placed after the raw-scan cap
+    const result = normalizeDrawingData({ colors: manyColors })
+    expect(result.colors).toEqual({})
+  })
+
   it('clamps an out-of-range activeLayerIndex', () => {
     const raw = {
       layers: [
