@@ -279,6 +279,23 @@ describe('decodeDrawing security bounds (compact-format path)', () => {
     expect(Object.keys(result!.layers[0].grid).length).toBeLessThanOrEqual(500 * 500)
   })
 
+  it('bounds a single grid entry with many colon-separated tokens at split time', () => {
+    // The ';' split is capped, but each individual entry's ':' split
+    // previously had no limit - a single entry crammed with millions of
+    // ':' characters (well under the outer 10MB string cap) would still
+    // materialize a huge array for that one entry alone, regardless of how
+    // few entries the outer split produced. split(':', 2) bounds the scan
+    // to at most 2 separators, matching parseCappedColorList's approach.
+    const manyColons = '0,0' + ':x'.repeat(300_000)
+    const compact = `v2|s|15|20|20|0||ff0000|Layer 1|1|${manyColons}`
+    const result = deserializeDrawing(compact)
+    expect(result).not.toBeNull()
+    // "x" isn't a valid color index into allColors, so the cell resolves
+    // to undefined and is dropped by normalizeLayerGrid - what matters is
+    // that this completes at all rather than hanging.
+    expect(Object.keys(result!.layers[0].grid)).toEqual([])
+  })
+
   it('bounds a legacy payload with many comma-separated colors instead of materializing them all', () => {
     // Well over MAX_COLOR_LIST_ENTRIES (10,000) but comfortably under
     // MAX_COMPACT_STRING_LENGTH so this exercises the color-list cap

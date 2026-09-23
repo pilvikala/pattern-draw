@@ -133,6 +133,21 @@ export const MAX_LAYERS = 50
 // canvasHeight entries, since out-of-range and malformed keys are dropped.
 const GRID_KEY_PATTERN = /^(-?\d+),(-?\d+)$/
 
+// compressColor (lib/serialization.ts) only understands 3- or 6-digit hex,
+// with or without a leading '#' - any other non-empty string (e.g. "#ggg",
+// "red", an object coerced to string) passes the old "just a non-empty
+// string" check unrejected, then compressColor's parseInt(..., 16) returns
+// NaN, and the cell round-trips through save/share as the color "#NaN"
+// instead of being caught here. Validating the format at normalization
+// time - the single choke point every save/share/localStorage path already
+// runs through - means every other function can keep assuming a stored
+// color is genuinely parseable.
+const HEX_COLOR_PATTERN = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
+
+function isValidHexColor(value: unknown): value is string {
+  return typeof value === 'string' && HEX_COLOR_PATTERN.test(value)
+}
+
 // Shared by normalizeLayerGrid and normalizeColors below: an accepted-entry
 // counter alone can't bound a for...in scan when the payload is crafted
 // entirely (or mostly) out of entries that never get accepted (malformed/
@@ -165,7 +180,7 @@ function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight:
     scanned++
     if (!Object.prototype.hasOwnProperty.call(record, key)) continue
     const value = record[key]
-    if (typeof value !== 'string' || !value) continue
+    if (!isValidHexColor(value)) continue
     const match = GRID_KEY_PATTERN.exec(key)
     if (!match) continue
     const row = Number(match[1])
@@ -222,7 +237,7 @@ function normalizeColors(rawColors: unknown): { [key: string]: string } {
     scanned++
     if (!Object.prototype.hasOwnProperty.call(record, key)) continue
     const value = record[key]
-    if (typeof value === 'string' && value) {
+    if (isValidHexColor(value)) {
       colors[key] = value
       count++
     }

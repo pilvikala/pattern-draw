@@ -423,6 +423,39 @@ describe('normalizeDrawingData', () => {
     expect(result.colors).toEqual({ '0': '#ff0000', '3': '#00ff00' })
   })
 
+  it('drops saved colors and painted cells with non-hex string values', () => {
+    // compressColor only understands 3- or 6-digit hex (with or without a
+    // leading '#'); any other string previously passed the old "just a
+    // non-empty string" check, then compressColor's parseInt(..., 16)
+    // returned NaN, corrupting the value into the literal color "#NaN" on
+    // the next round-trip instead of being rejected here.
+    const raw = {
+      colors: { good: '#ff0000', bad: '#ggg', word: 'red', short: '#ff00' },
+      layers: [{
+        id: 'a',
+        name: 'Layer 1',
+        visible: true,
+        grid: { '0,0': '#00ff00', '0,1': '#ggg', '0,2': 'red', '0,3': '#ff00' },
+      }],
+    }
+    const result = normalizeDrawingData(raw)
+    expect(result.colors).toEqual({ good: '#ff0000' })
+    expect(result.layers[0].grid).toEqual({ '0,0': '#00ff00' })
+  })
+
+  it('accepts both 3-digit and 6-digit hex, with or without a leading #', () => {
+    const raw = {
+      layers: [{
+        id: 'a',
+        name: 'Layer 1',
+        visible: true,
+        grid: { '0,0': '#f0a', '0,1': 'f0a', '0,2': '#ff00aa', '0,3': 'ff00aa' },
+      }],
+    }
+    const result = normalizeDrawingData(raw)
+    expect(result.layers[0].grid).toEqual({ '0,0': '#f0a', '0,1': 'f0a', '0,2': '#ff00aa', '0,3': 'ff00aa' })
+  })
+
   it('caps an excessive saved-colors count (rendering DoS guard)', () => {
     const manyColors: Record<string, string> = {}
     for (let i = 0; i < 5000; i++) manyColors[String(i)] = '#ff0000'

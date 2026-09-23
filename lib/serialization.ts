@@ -235,7 +235,12 @@ function deserializeV1(parts: string[]): DrawingData | null {
     // chance to stop early.
     const entries = parts[6].split(';', MAX_GRID_ENTRIES_PER_LAYER)
     for (let i = 0; i < entries.length && i < MAX_GRID_ENTRIES_PER_LAYER; i++) {
-      const [key, color] = entries[i].split(':')
+      // Bounded to 2 elements for the same reason as the ';' split above -
+      // a single entry crammed with millions of ':' characters (still well
+      // under the 10MB whole-string cap) would otherwise materialize a
+      // huge array for that one entry alone, regardless of how few entries
+      // the outer split produced.
+      const [key, color] = entries[i].split(':', 2)
       if (key && color) {
         grid[key] = allColors[color]
       }
@@ -289,7 +294,9 @@ function deserializeV2(parts: string[]): DrawingData | null {
       // Bounded split - see the identical comment in deserializeV1 above.
       const entries = gridStr.split(';', MAX_GRID_ENTRIES_PER_LAYER)
       for (let j = 0; j < entries.length && j < MAX_GRID_ENTRIES_PER_LAYER; j++) {
-        const [key, colorIdx] = entries[j].split(':')
+        // Bounded to 2 elements - see the identical comment in
+        // deserializeV1 above.
+        const [key, colorIdx] = entries[j].split(':', 2)
         if (key && colorIdx !== undefined) grid[key] = allColors[colorIdx]
       }
     }

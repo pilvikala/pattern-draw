@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, memo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
 import type { MatrixPattern, Tool, SelectionRect, Layer } from '@/lib/types'
 import { normalizeRect } from '@/lib/selection'
 import { compositeLayers } from '@/lib/layers'
@@ -598,6 +598,22 @@ export default function DrawingCanvas({
     }
   }, [handleTouchStart, handleTouchMove, handleTouchEnd])
 
+  // The moving-selection composites, cached for the duration of a drag
+  // instead of recomputed on every pointer move: computing them is
+  // deliberately NOT keyed on moveDelta, only on isMovingSelection turning
+  // on (or layers/activeLayerIndex changing while it's on) - moveDelta
+  // changes on every mousemove/touchmove while dragging, and redoing a full
+  // compositeLayers walk of every non-active/above layer on each of those
+  // (rather than just the cheap destination-cell lookup the paint effect
+  // below needs) could block the UI on a large multi-layer drag.
+  const dragComposites = useMemo(() => {
+    if (!isMovingSelection) return null
+    return {
+      below: compositeLayers(layers.filter((_, i) => i !== activeLayerIndex)),
+      above: compositeLayers(layers.slice(activeLayerIndex + 1)),
+    }
+  }, [isMovingSelection, layers, activeLayerIndex])
+
   // Paints the hole (layers below the active one, at the selection's
   // original position) and the floating preview (the active layer's
   // dragged content) onto their canvases. The hole only needs repainting
@@ -607,31 +623,23 @@ export default function DrawingCanvas({
   // non-active-layer composite *at the destination*, which shifts as the
   // selection is dragged (see the comment below the transparent-color
   // check), so this effect also depends on moveDelta despite the extra
-  // repaint cost while dragging.
+  // repaint cost while dragging - but only for the (cheap) per-cell lookup
+  // against dragComposites, not for recomputing it.
   useEffect(() => {
-    if (!isSelectMode || !selection || !isMovingSelection) return
+    if (!isSelectMode || !selection || !isMovingSelection || !dragComposites) return
     const width = selection.endCol - selection.startCol + 1
     const height = selection.endRow - selection.startRow + 1
 
-    // Computed here, inside the same isMovingSelection-gated effect that
-    // uses them, rather than as props eagerly derived from `selection` in
-    // the parent - `selection` goes non-null as soon as the user starts
-    // drawing the initial marquee, well before any move begins, so
-    // composites recomputed on every marquee-drag mousemove would still
-    // redo this work (up to canvasWidth*canvasHeight*layerCount cell
-    // visits at the editor's limits) for a preview nothing reads yet.
-    const belowActiveLayerGrid = compositeLayers(layers.filter((_, i) => i !== activeLayerIndex))
-    const aboveActiveLayerGrid = compositeLayers(layers.slice(activeLayerIndex + 1))
     // For the moving-selection "hole": sits on the same opaque white
     // "paper" as the base canvas, so an empty cell here (nothing on any
     // other layer) correctly falls back to white rather than 'transparent'.
     const getBelowActiveLayerPixelColor = (row: number, col: number): string =>
-      belowActiveLayerGrid[getPixelKey(row, col)] || '#ffffff'
+      dragComposites.below[getPixelKey(row, col)] || '#ffffff'
     // No fallback: `undefined` here means "nothing above the active layer
     // at this cell", distinct from a painted-but-white cell, so the caller
     // can tell whether to let it take over from the dragged color.
     const getAboveActiveLayerPixelColor = (row: number, col: number): string | undefined =>
-      aboveActiveLayerGrid[getPixelKey(row, col)]
+      dragComposites.above[getPixelKey(row, col)]
 
     // The backing store is one pixel per cell (not pixelSize per cell) and
     // scaled up to the on-screen size via CSS instead - at the maximum
@@ -682,7 +690,7 @@ export default function DrawingCanvas({
         })
       })
     }
-  }, [isSelectMode, selection, isMovingSelection, layers, activeLayerIndex, pixelSize, moveDelta])
+  }, [isSelectMode, selection, isMovingSelection, dragComposites, pixelSize, moveDelta])
 
   const renderSquare = (row: number, col: number) => {
     return (
