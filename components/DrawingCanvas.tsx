@@ -45,6 +45,11 @@ interface DrawingCanvasProps {
   // Just the active layer's cells - used for the moving-selection preview so
   // it shows only what's actually being relocated, not layers beneath it.
   activeLayerGrid: { [key: string]: string }
+  // Composite of every *other* visible layer (everything except the active
+  // one) - used to render the moving-selection "hole" left at the original
+  // position, so it shows what's actually still there (other layers) rather
+  // than a flat color standing in for "empty".
+  belowActiveLayerGrid: { [key: string]: string }
   onPixelFill: (key: string, color: string) => void
   tool: Tool
   selection: SelectionRect | null
@@ -60,6 +65,7 @@ export default function DrawingCanvas({
   selectedColor,
   grid,
   activeLayerGrid,
+  belowActiveLayerGrid,
   onPixelFill,
   tool,
   selection,
@@ -100,6 +106,14 @@ export default function DrawingCanvas({
   const getPixelColor = (row: number, col: number): string => {
     const key = getPixelKey(row, col)
     return grid[key] || '#ffffff'
+  }
+
+  // For the moving-selection "hole": sits on the same opaque white "paper"
+  // as the base canvas, so an empty cell here (nothing on any other layer)
+  // correctly falls back to white rather than 'transparent'.
+  const getBelowActiveLayerPixelColor = (row: number, col: number): string => {
+    const key = getPixelKey(row, col)
+    return belowActiveLayerGrid[key] || '#ffffff'
   }
 
   const getActiveLayerPixelColor = (row: number, col: number): string => {
@@ -717,8 +731,25 @@ export default function DrawingCanvas({
                   top: `${selection.startRow * pixelSize}px`,
                   width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
                   height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${selection.endCol - selection.startCol + 1}, ${pixelSize}px)`,
+                  gridTemplateRows: `repeat(${selection.endRow - selection.startRow + 1}, ${pixelSize}px)`,
                 }}
-              />
+              >
+                {/* Renders the other (non-active) layers for this rect,
+                    rather than a flat overlay color, so the hole left by
+                    the active layer's content actually shows what's really
+                    underneath instead of standing in a fake "empty" color. */}
+                {Array.from({ length: selection.endRow - selection.startRow + 1 }).map((_, r) =>
+                  Array.from({ length: selection.endCol - selection.startCol + 1 }).map((_, c) => (
+                    <div
+                      key={`${r},${c}`}
+                      className={styles.selectionHoleCell}
+                      style={{ backgroundColor: getBelowActiveLayerPixelColor(selection.startRow + r, selection.startCol + c) }}
+                    />
+                  ))
+                )}
+              </div>
               <div
                 className={styles.selectionFloating}
                 style={{

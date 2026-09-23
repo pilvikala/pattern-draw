@@ -368,7 +368,17 @@ export async function decodeDrawing(encoded: string): Promise<DrawingData | null
       return compactData
     }
 
-    // Fallback to old JSON format (pre-dates the compact format entirely)
+    // Fallback to old JSON format (pre-dates the compact format entirely).
+    // deserializeDrawing (tried above) already rejects a `decoded` longer
+    // than MAX_COMPACT_STRING_LENGTH, but only for the compact format - an
+    // encoded value that decodes (via plain atob, no compression) to
+    // something over that length still reaches here, and without this
+    // check would hand decodeURIComponent/JSON.parse a multi-megabyte
+    // string with no bound at all.
+    if (decoded.length > MAX_COMPACT_STRING_LENGTH) {
+      console.error('Decoded drawing payload too large for the legacy JSON fallback, rejecting')
+      return null
+    }
     try {
       const jsonStr = decodeURIComponent(decoded)
       const data = JSON.parse(jsonStr)

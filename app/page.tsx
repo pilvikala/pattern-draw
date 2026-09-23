@@ -14,7 +14,7 @@ import LayersDrawer from '@/components/LayersDrawer'
 import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
 import { floodFillGrid } from '@/lib/floodFill'
 import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
-import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, MAX_LAYERS } from '@/lib/layers'
+import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, mergeLayerDown, MAX_LAYERS } from '@/lib/layers'
 import { trimHistoryToBudget } from '@/lib/history'
 import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry } from '@/lib/types'
 import { TRANSPARENT } from '@/lib/types'
@@ -90,6 +90,14 @@ function HomeContent() {
   // canvas and what export/preview render.
   const compositeGrid = useMemo(() => compositeLayers(layers), [layers])
   const activeLayer = layers[activeLayerIndex] ?? layers[0]
+  // Composite of every layer *except* the active one - used only to render
+  // the moving-selection "hole" left at the original position while
+  // dragging, so it shows what's actually still there (other layers)
+  // instead of a flat stand-in color.
+  const belowActiveLayerGrid = useMemo(
+    () => compositeLayers(layers.filter((_, i) => i !== activeLayerIndex)),
+    [layers, activeLayerIndex]
+  )
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -1000,20 +1008,9 @@ function HomeContent() {
   const handleMergeLayerDown = useCallback((id: string) => {
     const prev = layersRef.current
     const index = prev.findIndex((l) => l.id === id)
-    if (index <= 0) return
-    const source = prev[index]
-    if (!source.visible) return
-    const target = prev[index - 1]
+    if (index <= 0 || !prev[index].visible) return
 
-    const mergedGrid = { ...target.grid }
-    for (const key in source.grid) {
-      const color = source.grid[key]
-      if (color) mergedGrid[key] = color
-    }
-
-    const newLayers = prev
-      .filter((_, i) => i !== index)
-      .map((l) => (l.id === target.id ? { ...target, grid: mergedGrid } : l))
+    const newLayers = mergeLayerDown(prev, id)
     layersRef.current = newLayers
     setLayers(newLayers)
 
@@ -1164,6 +1161,7 @@ function HomeContent() {
                 selectedColor={selectedColor}
                 grid={compositeGrid}
                 activeLayerGrid={activeLayer?.grid || {}}
+                belowActiveLayerGrid={belowActiveLayerGrid}
                 onPixelFill={handlePixelFill}
                 tool={tool}
                 selection={selection}

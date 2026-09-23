@@ -317,4 +317,18 @@ describe('decodeDrawing decompression-bomb guard', () => {
     const result = await decodeDrawing(encoded)
     expect(result?.layers[0].grid).toEqual({ '1,1': '#ff0000' })
   })
+
+  it('rejects an oversized payload in the legacy JSON fallback too, not just the compact-format path', async () => {
+    // Not valid gzip, so decompression fails and this falls through to the
+    // plain-atob path, then to the legacy JSON fallback (since it isn't
+    // valid compact format either) - the exact route that bypassed the
+    // size guard before: deserializeDrawing's own length check only
+    // applies on the compact-format branch, not this one.
+    const hugeJsonString = JSON.stringify({ pattern: 'squares', dummy: 'x'.repeat(11_000_000) })
+    const base64 = Buffer.from(hugeJsonString, 'utf-8').toString('base64')
+    const base64url = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+    const result = await decodeDrawing(base64url)
+    expect(result).toBeNull()
+  })
 })

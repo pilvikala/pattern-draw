@@ -41,6 +41,32 @@ export function clampActiveLayerIndex(index: number, layerCount: number): number
   return Math.max(0, Math.min(index, layerCount - 1))
 }
 
+// Merges the layer with `sourceId` into the layer directly below it. The
+// merged layer is always left visible: merging only ever starts from a
+// visible source (see the early return below, which mirrors the UI's own
+// merge-down availability rule), so spreading the *target*'s own `visible`
+// into the result would silently hide content that was on-screen a moment
+// before the merge whenever the target underneath happened to be hidden.
+// Returns `layers` unchanged if the merge isn't valid (no id match, already
+// the bottom layer, or the source itself is hidden).
+export function mergeLayerDown(layers: Layer[], sourceId: string): Layer[] {
+  const index = layers.findIndex((l) => l.id === sourceId)
+  if (index <= 0) return layers
+  const source = layers[index]
+  if (!source.visible) return layers
+  const target = layers[index - 1]
+
+  const mergedGrid = { ...target.grid }
+  for (const key in source.grid) {
+    const color = source.grid[key]
+    if (color) mergedGrid[key] = color
+  }
+
+  return layers
+    .filter((_, i) => i !== index)
+    .map((l) => (l.id === target.id ? { ...target, grid: mergedGrid, visible: true } : l))
+}
+
 const VALID_PATTERNS: MatrixPattern[] = ['squares', 'bricks', 'bricksVertical']
 
 // Validates against the three known literals rather than casting - an
@@ -110,7 +136,16 @@ function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight:
     const row = Number(match[1])
     const col = Number(match[2])
     if (row < 0 || row >= canvasHeight || col < 0 || col >= canvasWidth) continue
-    grid[key] = value
+    // Store the canonical `${row},${col}` spelling, not the original key -
+    // the regex accepts any numeric spelling of the same coordinate (e.g.
+    // "00,01" or "0,+1"), but every other lookup in the app (rendering,
+    // compositeLayers, selection) always builds keys via that exact
+    // template, so a noncanonical key would sit in the grid invisibly:
+    // never rendered, never selectable, yet still retained and counted -
+    // and several such aliases of one cell would also bypass the "at most
+    // canvasWidth * canvasHeight entries" bound that relies on one entry
+    // per real, canonically-addressed cell.
+    grid[`${row},${col}`] = value
   }
   return grid
 }
@@ -152,12 +187,20 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
 
   let layers: Layer[]
   if (Array.isArray(data.layers) && data.layers.length > 0) {
-    layers = (data.layers as Partial<Layer>[]).slice(0, MAX_LAYERS).map((layer) => ({
-      id: typeof layer.id === 'string' && layer.id ? layer.id : createLayerId(),
-      name: typeof layer.name === 'string' && layer.name ? layer.name : 'Layer',
-      visible: layer.visible !== false,
-      grid: normalizeLayerGrid(layer.grid, canvasWidth, canvasHeight),
-    }))
+    layers = (data.layers as unknown[]).slice(0, MAX_LAYERS).map((raw) => {
+      // Array elements are also client/localStorage-controlled JSON and can
+      // individually be null/a non-object (e.g. `{ layers: [null, {...}] }`)
+      // even when the array itself is well-formed - reading .id/.name/etc
+      // off one directly would throw before normalization can produce its
+      // documented safe defaults.
+      const layer = (raw && typeof raw === 'object' ? raw : {}) as Partial<Layer>
+      return {
+        id: typeof layer.id === 'string' && layer.id ? layer.id : createLayerId(),
+        name: typeof layer.name === 'string' && layer.name ? layer.name : 'Layer',
+        visible: layer.visible !== false,
+        grid: normalizeLayerGrid(layer.grid, canvasWidth, canvasHeight),
+      }
+    })
   } else {
     layers = migrateGridToLayers(normalizeLayerGrid(data.grid, canvasWidth, canvasHeight))
   }

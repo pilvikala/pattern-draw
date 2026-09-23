@@ -5,6 +5,7 @@ import {
   migrateGridToLayers,
   normalizeDrawingData,
   clampActiveLayerIndex,
+  mergeLayerDown,
 } from './layers'
 import type { Layer } from './types'
 
@@ -82,6 +83,79 @@ describe('clampActiveLayerIndex', () => {
   })
 })
 
+describe('mergeLayerDown', () => {
+  it('merges the source layer\'s cells onto the target below it', () => {
+    const layers: Layer[] = [
+      createLayer('Bottom', { '0,0': '#0000ff' }),
+      createLayer('Top', { '1,1': '#ff0000' }),
+    ]
+    const result = mergeLayerDown(layers, layers[1].id)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].grid).toEqual({ '0,0': '#0000ff', '1,1': '#ff0000' })
+  })
+
+  it('lets the source overwrite overlapping cells on the target (source is on top)', () => {
+    const layers: Layer[] = [
+      createLayer('Bottom', { '0,0': '#0000ff' }),
+      createLayer('Top', { '0,0': '#ff0000' }),
+    ]
+    const result = mergeLayerDown(layers, layers[1].id)
+    expect(result[0].grid).toEqual({ '0,0': '#ff0000' })
+  })
+
+  it('keeps the merged layer visible even when the target underneath was hidden', () => {
+    // Regression test: merging a visible layer into a hidden one must not
+    // hide the result - the content was on screen a moment before the merge.
+    const hiddenTarget = createLayer('Bottom', { '0,0': '#0000ff' })
+    hiddenTarget.visible = false
+    const visibleSource = createLayer('Top', { '1,1': '#ff0000' })
+    const layers: Layer[] = [hiddenTarget, visibleSource]
+
+    const result = mergeLayerDown(layers, visibleSource.id)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].visible).toBe(true)
+    expect(result[0].grid).toEqual({ '0,0': '#0000ff', '1,1': '#ff0000' })
+  })
+
+  it('preserves the target layer\'s id and name', () => {
+    const layers: Layer[] = [createLayer('Keep My Name'), createLayer('Discarded Name')]
+    const targetId = layers[0].id
+    const result = mergeLayerDown(layers, layers[1].id)
+
+    expect(result[0].id).toBe(targetId)
+    expect(result[0].name).toBe('Keep My Name')
+  })
+
+  it('is a no-op when the source is the bottom-most layer', () => {
+    const layers: Layer[] = [createLayer('Only'), createLayer('Second')]
+    const result = mergeLayerDown(layers, layers[0].id)
+    expect(result).toBe(layers)
+  })
+
+  it('is a no-op when the source layer is hidden (matches the UI\'s merge-down gate)', () => {
+    const hiddenSource = createLayer('Top')
+    hiddenSource.visible = false
+    const layers: Layer[] = [createLayer('Bottom'), hiddenSource]
+    const result = mergeLayerDown(layers, hiddenSource.id)
+    expect(result).toBe(layers)
+  })
+
+  it('is a no-op when the id does not match any layer', () => {
+    const layers: Layer[] = [createLayer('A'), createLayer('B')]
+    const result = mergeLayerDown(layers, 'nonexistent-id')
+    expect(result).toBe(layers)
+  })
+
+  it('does not mutate the input array or layers', () => {
+    const layers: Layer[] = [createLayer('Bottom', { '0,0': '#0000ff' }), createLayer('Top', { '1,1': '#ff0000' })]
+    const snapshot = JSON.parse(JSON.stringify(layers))
+    mergeLayerDown(layers, layers[1].id)
+    expect(layers).toEqual(snapshot)
+  })
+})
+
 describe('normalizeDrawingData', () => {
   it('passes through current-format data with a layers array', () => {
     const raw = {
@@ -122,6 +196,22 @@ describe('normalizeDrawingData', () => {
     expect(result.pixelSize).toBe(15)
     expect(result.layers).toHaveLength(1)
     expect(result.layers[0].grid).toEqual({})
+  })
+
+  it('does not crash on a null or non-object element inside the layers array', () => {
+    // data.layers is client/localStorage-controlled JSON; the array can be
+    // well-formed while individual elements are null (e.g. hand-edited
+    // localStorage, or `JSON.stringify` round-tripping a sparse array).
+    const raw = { layers: [null, { id: 'a', name: 'Real Layer', visible: true, grid: { '0,0': '#ff0000' } }, 'not-an-object', 42] }
+    const result = normalizeDrawingData(raw)
+
+    expect(result.layers).toHaveLength(4)
+    // The null/non-object entries fall back to a blank, safely-defaulted layer
+    expect(result.layers[0].grid).toEqual({})
+    expect(typeof result.layers[0].id).toBe('string')
+    expect(result.layers[0].name).toBe('Layer')
+    // The well-formed entry is preserved
+    expect(result.layers[1]).toMatchObject({ name: 'Real Layer', visible: true, grid: { '0,0': '#ff0000' } })
   })
 
   it('falls back to squares for an invalid pattern value instead of passing it through', () => {
@@ -184,6 +274,37 @@ describe('normalizeDrawingData', () => {
     }
     const result = normalizeDrawingData(raw)
     expect(result.layers[0].grid).toEqual({ '0,0': '#ff0000', '4,4': '#00ff00', '2,2': '#000000' })
+  })
+
+  it('canonicalizes noncanonical numeric key spellings instead of storing them verbatim', () => {
+    // The renderer, compositeLayers, and selection code all build lookup
+    // keys via the exact `${row},${col}` template - a stored key like
+    // "00,01" would pass coordinate validation but never be found by any of
+    // them, making the cell permanently invisible while still occupying an
+    // entry (and letting several aliases of one cell bypass the intended
+    // one-entry-per-cell bound).
+    const raw = {
+      canvasWidth: 5,
+      canvasHeight: 5,
+      layers: [{ id: 'a', name: 'Layer 1', visible: true, grid: { '00,01': '#ff0000' } }],
+    }
+    const result = normalizeDrawingData(raw)
+    expect(result.layers[0].grid).toEqual({ '0,1': '#ff0000' })
+  })
+
+  it('deduplicates multiple noncanonical aliases of the same cell into one canonical entry', () => {
+    const raw = {
+      canvasWidth: 5,
+      canvasHeight: 5,
+      layers: [{
+        id: 'a',
+        name: 'Layer 1',
+        visible: true,
+        grid: { '0,1': '#000000', '00,1': '#ff0000', '0,01': '#00ff00' },
+      }],
+    }
+    const result = normalizeDrawingData(raw)
+    expect(Object.keys(result.layers[0].grid)).toEqual(['0,1'])
   })
 
   it('drops malformed grid keys and non-string values', () => {
