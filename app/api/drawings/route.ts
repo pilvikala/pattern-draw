@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { serializeDrawing, MAX_COMPACT_STRING_LENGTH } from '@/lib/serialization'
-import { normalizeDrawingData } from '@/lib/layers'
+import { normalizeDrawingData, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
 
 // GET /api/drawings - List all drawings for the authenticated user
 export async function GET(request: NextRequest) {
@@ -70,7 +70,18 @@ export async function POST(request: NextRequest) {
         // faithfully encode into the stored string, which every later load
         // of this drawing (including this same user's own drawings list
         // and the GET route) would then have to parse back out.
-        const serialized = serializeDrawing(normalizeDrawingData(drawingData))
+        const normalized = normalizeDrawingData(drawingData)
+
+        // Cheap aggregate-size preflight before the expensive serialization
+        // work below - see MAX_TOTAL_GRID_ENTRIES's comment.
+        if (totalGridEntryCount(normalized) > MAX_TOTAL_GRID_ENTRIES) {
+            return NextResponse.json(
+                { error: 'Drawing is too large to save' },
+                { status: 400 }
+            )
+        }
+
+        const serialized = serializeDrawing(normalized)
 
         // normalizeDrawingData bounds each layer's grid independently, but
         // not the aggregate across all layers combined - many large-but-

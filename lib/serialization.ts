@@ -136,7 +136,7 @@ export function serializeDrawing(data: DrawingData): string {
   // indexOf would rescan the whole palette per painted cell (O(paintedCells
   // * uniqueColors)) - a Map built once makes each lookup O(1), which
   // matters since this runs synchronously on the share-link and save paths.
-  const colorIndexByCompressed = new Map(allColorsArraySorted.map((c, i) => [c, i]))
+  const colorIndexByCompressed = new Map(allColorsArraySorted.map((c, i) => [c, i] as const))
 
   const layerFields: string[] = []
   for (const layer of data.layers) {
@@ -217,7 +217,11 @@ function deserializeV1(parts: string[]): DrawingData | null {
 
   const grid: { [key: string]: string } = {}
   if (parts[6]) {
-    const entries = parts[6].split(';')
+    // Bounded split - see parseCappedColorList's comment. Without the limit
+    // argument, split() would materialize the full entries array (one
+    // element per ';' in the payload) before the loop below ever gets a
+    // chance to stop early.
+    const entries = parts[6].split(';', MAX_GRID_ENTRIES_PER_LAYER)
     for (let i = 0; i < entries.length && i < MAX_GRID_ENTRIES_PER_LAYER; i++) {
       const [key, color] = entries[i].split(':')
       if (key && color) {
@@ -270,7 +274,8 @@ function deserializeV2(parts: string[]): DrawingData | null {
     const gridStr = layerFields[i + 2] || ''
     const grid: { [key: string]: string } = {}
     if (gridStr) {
-      const entries = gridStr.split(';')
+      // Bounded split - see the identical comment in deserializeV1 above.
+      const entries = gridStr.split(';', MAX_GRID_ENTRIES_PER_LAYER)
       for (let j = 0; j < entries.length && j < MAX_GRID_ENTRIES_PER_LAYER; j++) {
         const [key, colorIdx] = entries[j].split(':')
         if (key && colorIdx !== undefined) grid[key] = allColors[colorIdx]

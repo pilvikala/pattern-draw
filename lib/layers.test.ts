@@ -6,6 +6,7 @@ import {
   normalizeDrawingData,
   clampActiveLayerIndex,
   mergeLayerDown,
+  totalGridEntryCount,
 } from './layers'
 import type { Layer } from './types'
 
@@ -228,6 +229,28 @@ describe('normalizeDrawingData', () => {
     expect(result.layers[1]).toMatchObject({ name: 'Real Layer', visible: true, grid: { '0,0': '#ff0000' } })
   })
 
+  it('replaces duplicate layer ids with fresh unique ones', () => {
+    // Client/localStorage-controlled JSON can carry the same id on two
+    // layers (hand-edited, or a bug elsewhere). Without deduplication,
+    // React keys collide and every id-based action (delete/select/merge)
+    // targets all matching layers instead of exactly one.
+    const raw = {
+      layers: [
+        { id: 'dup', name: 'First', visible: true, grid: { '0,0': '#ff0000' } },
+        { id: 'dup', name: 'Second', visible: true, grid: { '1,1': '#00ff00' } },
+        { id: 'dup', name: 'Third', visible: true, grid: { '2,2': '#0000ff' } },
+      ],
+    }
+
+    const result = normalizeDrawingData(raw)
+    const ids = result.layers.map((l) => l.id)
+    expect(new Set(ids).size).toBe(3)
+    // Content stays associated with the right (now-unique) id
+    expect(result.layers.find((l) => l.name === 'First')?.grid).toEqual({ '0,0': '#ff0000' })
+    expect(result.layers.find((l) => l.name === 'Second')?.grid).toEqual({ '1,1': '#00ff00' })
+    expect(result.layers.find((l) => l.name === 'Third')?.grid).toEqual({ '2,2': '#0000ff' })
+  })
+
   it('falls back to squares for an invalid pattern value instead of passing it through', () => {
     const result = normalizeDrawingData({ pattern: 'not-a-real-pattern' })
     expect(result.pattern).toBe('squares')
@@ -375,5 +398,22 @@ describe('normalizeDrawingData', () => {
       activeLayerIndex: 99,
     }
     expect(normalizeDrawingData(raw).activeLayerIndex).toBe(1)
+  })
+})
+
+describe('totalGridEntryCount', () => {
+  it('sums painted cell counts across all layers', () => {
+    const data = normalizeDrawingData({
+      layers: [
+        { id: 'a', name: 'Layer 1', visible: true, grid: { '0,0': '#ff0000', '0,1': '#00ff00' } },
+        { id: 'b', name: 'Layer 2', visible: true, grid: { '1,0': '#0000ff' } },
+      ],
+    })
+    expect(totalGridEntryCount(data)).toBe(3)
+  })
+
+  it('returns 0 for a drawing with no painted cells', () => {
+    const data = normalizeDrawingData({ layers: [{ id: 'a', name: 'Layer 1', visible: true, grid: {} }] })
+    expect(totalGridEntryCount(data)).toBe(0)
   })
 })

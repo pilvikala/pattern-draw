@@ -609,24 +609,31 @@ export default function DrawingCanvas({
     const width = selection.endCol - selection.startCol + 1
     const height = selection.endRow - selection.startRow + 1
 
+    // The backing store is one pixel per cell (not pixelSize per cell) and
+    // scaled up to the on-screen size via CSS instead - at the maximum
+    // canvas size and pixelSize (500 cells x 50px), a pixelSize-scaled
+    // backing store would be 25,000x25,000px, around 2.5GB per canvas,
+    // which can hang or crash the tab on a large selection.
     const holeCtx = holeCanvasRef.current?.getContext('2d')
     if (holeCtx) {
-      holeCtx.clearRect(0, 0, width * pixelSize, height * pixelSize)
+      holeCtx.imageSmoothingEnabled = false
+      holeCtx.clearRect(0, 0, width, height)
       for (let r = 0; r < height; r++) {
         for (let c = 0; c < width; c++) {
           holeCtx.fillStyle = getBelowActiveLayerPixelColor(selection.startRow + r, selection.startCol + c)
-          holeCtx.fillRect(c * pixelSize, r * pixelSize, pixelSize, pixelSize)
+          holeCtx.fillRect(c, r, 1, 1)
         }
       }
     }
 
     const floatingCtx = floatingCanvasRef.current?.getContext('2d')
     if (floatingCtx && movingSnapshotRef.current) {
-      floatingCtx.clearRect(0, 0, width * pixelSize, height * pixelSize)
+      floatingCtx.imageSmoothingEnabled = false
+      floatingCtx.clearRect(0, 0, width, height)
       movingSnapshotRef.current.forEach((rowColors, r) => {
         rowColors.forEach((color, c) => {
           floatingCtx.fillStyle = color
-          floatingCtx.fillRect(c * pixelSize, r * pixelSize, pixelSize, pixelSize)
+          floatingCtx.fillRect(c, r, 1, 1)
         })
       })
     }
@@ -772,8 +779,8 @@ export default function DrawingCanvas({
               <canvas
                 ref={holeCanvasRef}
                 className={styles.selectionHole}
-                width={(selection.endCol - selection.startCol + 1) * pixelSize}
-                height={(selection.endRow - selection.startRow + 1) * pixelSize}
+                width={selection.endCol - selection.startCol + 1}
+                height={selection.endRow - selection.startRow + 1}
                 style={{
                   left: `${selection.startCol * pixelSize}px`,
                   top: `${selection.startRow * pixelSize}px`,
@@ -784,8 +791,8 @@ export default function DrawingCanvas({
               <canvas
                 ref={floatingCanvasRef}
                 className={styles.selectionFloating}
-                width={(selection.endCol - selection.startCol + 1) * pixelSize}
-                height={(selection.endRow - selection.startRow + 1) * pixelSize}
+                width={selection.endCol - selection.startCol + 1}
+                height={selection.endRow - selection.startRow + 1}
                 style={{
                   left: `${(selection.startCol + moveDelta.dCol) * pixelSize}px`,
                   top: `${(selection.startRow + moveDelta.dRow) * pixelSize}px`,

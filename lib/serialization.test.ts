@@ -265,6 +265,20 @@ describe('decodeDrawing security bounds (compact-format path)', () => {
     expect(result!.canvasHeight).toBeLessThanOrEqual(500)
   })
 
+  it('bounds a v2 layer grid string with many semicolon-separated entries at split time, not just via the loop bound', () => {
+    // Mirrors parseCappedColorList's fix: split(';') without a limit would
+    // materialize one array element per ';' in the payload regardless of
+    // where the parse loop below stops, so the cap has to apply to the
+    // split call itself. Uses varied keys (not a single repeated key) so
+    // the resulting grid size actually reflects how many entries were
+    // parsed, rather than collapsing to one entry via object-key overwrite.
+    const manyEntries = Array.from({ length: 300_000 }, (_, i) => `${i % 500},${Math.floor(i / 500) % 500}:0`).join(';')
+    const compact = `v2|s|15|500|500|0||ff0000|Layer 1|1|${manyEntries}`
+    const result = deserializeDrawing(compact)
+    expect(result).not.toBeNull()
+    expect(Object.keys(result!.layers[0].grid).length).toBeLessThanOrEqual(500 * 500)
+  })
+
   it('bounds a legacy payload with many comma-separated colors instead of materializing them all', () => {
     // Well over MAX_COLOR_LIST_ENTRIES (10,000) but comfortably under
     // MAX_COMPACT_STRING_LENGTH so this exercises the color-list cap

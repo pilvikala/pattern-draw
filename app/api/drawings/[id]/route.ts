@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { serializeDrawing, deserializeDrawing, MAX_COMPACT_STRING_LENGTH } from '@/lib/serialization'
-import { normalizeDrawingData } from '@/lib/layers'
+import { normalizeDrawingData, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
 
 // GET /api/drawings/[id] - Load a specific drawing
 export async function GET(
@@ -125,7 +125,18 @@ export async function PUT(
 
         // Normalize before serializing - see the POST route in
         // app/api/drawings/route.ts for why this can't be skipped.
-        const serialized = serializeDrawing(normalizeDrawingData(drawingData))
+        const normalized = normalizeDrawingData(drawingData)
+
+        // Cheap aggregate-size preflight before the expensive serialization
+        // work below - see MAX_TOTAL_GRID_ENTRIES's comment.
+        if (totalGridEntryCount(normalized) > MAX_TOTAL_GRID_ENTRIES) {
+            return NextResponse.json(
+                { error: 'Drawing is too large to save' },
+                { status: 400 }
+            )
+        }
+
+        const serialized = serializeDrawing(normalized)
 
         // Same aggregate-size guard as the POST route - see
         // MAX_COMPACT_STRING_LENGTH's comment for why per-layer bounds alone

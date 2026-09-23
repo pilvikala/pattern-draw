@@ -195,6 +195,12 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
 
   let layers: Layer[]
   if (Array.isArray(data.layers) && data.layers.length > 0) {
+    // Duplicate ids (e.g. from hand-edited localStorage or a crafted shared
+    // link) would make layer.id no longer uniquely identify a layer -
+    // React keys collide, and every id-based lookup (delete, select,
+    // rename, merge) would then hit all matching layers at once instead of
+    // exactly one, so a collision is replaced with a fresh id here.
+    const seenIds = new Set<string>()
     layers = (data.layers as unknown[]).slice(0, MAX_LAYERS).map((raw) => {
       // Array elements are also client/localStorage-controlled JSON and can
       // individually be null/a non-object (e.g. `{ layers: [null, {...}] }`)
@@ -202,8 +208,11 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
       // off one directly would throw before normalization can produce its
       // documented safe defaults.
       const layer = (raw && typeof raw === 'object' ? raw : {}) as Partial<Layer>
+      let id = typeof layer.id === 'string' && layer.id ? layer.id : createLayerId()
+      if (seenIds.has(id)) id = createLayerId()
+      seenIds.add(id)
       return {
-        id: typeof layer.id === 'string' && layer.id ? layer.id : createLayerId(),
+        id,
         name: typeof layer.name === 'string' && layer.name ? layer.name : 'Layer',
         visible: layer.visible !== false,
         grid: normalizeLayerGrid(layer.grid, canvasWidth, canvasHeight),
@@ -219,4 +228,21 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
   )
 
   return { pattern, pixelSize, canvasWidth, canvasHeight, colors, layers, activeLayerIndex }
+}
+
+// normalizeDrawingData bounds each layer's grid independently (at most
+// canvasWidth * canvasHeight entries, up to MAX_LAYERS layers), but nothing
+// bounds the sum across all layers. A save request with many large-but-
+// individually-valid layers (worst case: MAX_LAYERS layers each fully
+// painted at MAX_CANVAS_DIMENSION^2, 12.5M cells total) would otherwise
+// reach serializeDrawing's per-cell entry-string building and color-
+// frequency counting in full before the API routes' post-serialization
+// MAX_COMPACT_STRING_LENGTH check ever gets a chance to reject it - the
+// expensive work already happened. Counting keys is far cheaper than
+// serializing (no string building, no sorting), so this preflight can run
+// before that work instead of after it.
+export const MAX_TOTAL_GRID_ENTRIES = 2_000_000
+
+export function totalGridEntryCount(data: DrawingData): number {
+  return data.layers.reduce((sum, layer) => sum + Object.keys(layer.grid).length, 0)
 }
