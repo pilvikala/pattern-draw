@@ -29,12 +29,6 @@ export type { MatrixPattern, DrawingData } from '@/lib/types'
 // chat apps, SMS, older proxies, etc.) past roughly this many characters.
 const SAFE_SHARE_URL_LENGTH = 2000
 
-// Stable empty-object reference for belowActiveLayerGrid/aboveActiveLayerGrid
-// when there's no selection to preview - a fresh `{}` on every render would
-// give DrawingCanvas a new prop identity each time regardless, undermining
-// the point of skipping the composite work below.
-const EMPTY_GRID: { [key: string]: string } = {}
-
 // Prisma's default cuid() ids are alphanumeric; this is intentionally a bit
 // more permissive (covers uuid/nanoid too) while still rejecting anything
 // that could act as a path segment other than a plain opaque id - notably
@@ -96,31 +90,17 @@ function HomeContent() {
   // canvas and what export/preview render.
   const compositeGrid = useMemo(() => compositeLayers(layers), [layers])
   const activeLayer = layers[activeLayerIndex] ?? layers[0]
-  // Composite of every layer *except* the active one - renders the
-  // moving-selection "hole" left at the original position while dragging
-  // (what's actually still there once the active layer's content leaves),
-  // and previews a transparent moved cell's destination (what the drop will
-  // leave visible there, since pasting TRANSPARENT deletes only the active
-  // layer's own content at that cell). Only needed while a selection
-  // exists, which never overlaps with painting (a distinct tool/workflow) -
-  // gating on that avoids walking every cell of every layer again on each
-  // ordinary paint, which at the editor's own limits (50 layers x 500x500)
-  // would otherwise cost millions of grid visits per edit for no reason,
-  // since nothing here would even be rendered without a selection.
-  const belowActiveLayerGrid = useMemo(
-    () => (selection ? compositeLayers(layers.filter((_, i) => i !== activeLayerIndex)) : EMPTY_GRID),
-    [layers, activeLayerIndex, selection]
-  )
-  // Composite of only the layers stacked *above* the active one - used to
-  // preview an opaque moved cell's destination: if a layer above the active
-  // one already has content there, it stays on top after the drop (layer
-  // order doesn't change just because the active layer's content moved), so
-  // the drag preview needs to respect that instead of always showing the
-  // dragged color on top of everything. Same selection-gating as above.
-  const aboveActiveLayerGrid = useMemo(
-    () => (selection ? compositeLayers(layers.slice(activeLayerIndex + 1)) : EMPTY_GRID),
-    [layers, activeLayerIndex, selection]
-  )
+  // The moving-selection "hole"/floating-preview composites (everything
+  // except the active layer, and everything above it) are computed inside
+  // DrawingCanvas itself, from the raw `layers`/`activeLayerIndex` passed
+  // down below - not here. `selection` goes non-null as soon as the user
+  // starts drawing the initial marquee, well before any move begins, so a
+  // memo here keyed on `selection` would still redo that composite work
+  // (up to canvasWidth*canvasHeight*layerCount cell visits at the editor's
+  // limits) on every marquee-drag mousemove, for a preview nothing reads
+  // until a move actually starts. Computing it inside DrawingCanvas's own
+  // isMovingSelection-gated effect ties the work to the condition that
+  // actually needs it.
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -1197,8 +1177,8 @@ function HomeContent() {
                 selectedColor={selectedColor}
                 grid={compositeGrid}
                 activeLayerGrid={activeLayer?.grid || {}}
-                belowActiveLayerGrid={belowActiveLayerGrid}
-                aboveActiveLayerGrid={aboveActiveLayerGrid}
+                layers={layers}
+                activeLayerIndex={activeLayerIndex}
                 onPixelFill={handlePixelFill}
                 tool={tool}
                 selection={selection}

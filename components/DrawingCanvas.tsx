@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, memo } from 'react'
-import type { MatrixPattern, Tool, SelectionRect } from '@/lib/types'
+import type { MatrixPattern, Tool, SelectionRect, Layer } from '@/lib/types'
 import { normalizeRect } from '@/lib/selection'
+import { compositeLayers } from '@/lib/layers'
 import styles from './DrawingCanvas.module.css'
 
 interface PixelProps {
@@ -45,17 +46,16 @@ interface DrawingCanvasProps {
   // Just the active layer's cells - used for the moving-selection preview so
   // it shows only what's actually being relocated, not layers beneath it.
   activeLayerGrid: { [key: string]: string }
-  // Composite of every *other* visible layer (everything except the active
-  // one) - used to render the moving-selection "hole" left at the original
-  // position, so it shows what's actually still there (other layers) rather
-  // than a flat color standing in for "empty", and to preview a transparent
-  // moved cell's destination.
-  belowActiveLayerGrid: { [key: string]: string }
-  // Composite of only the visible layers stacked above the active one -
-  // used to preview an opaque moved cell's destination, since a layer
-  // above the active one stays on top after the drop regardless of what
-  // the active layer's own content becomes there.
-  aboveActiveLayerGrid: { [key: string]: string }
+  // The full layer stack and the active layer's index - used only to
+  // compute the "hole"/floating-preview composites (see the paint effect
+  // below), and only while an actual move-drag is happening. Passed raw
+  // (rather than pre-composited by the caller) so that composite work
+  // only ever runs inside that gated effect: `selection` alone goes
+  // non-null as soon as the user starts drawing the initial marquee, well
+  // before any move begins, so composites eagerly derived from `selection`
+  // changing would still redo this work on every marquee-drag mousemove.
+  layers: Layer[]
+  activeLayerIndex: number
   onPixelFill: (key: string, color: string) => void
   tool: Tool
   selection: SelectionRect | null
@@ -71,8 +71,8 @@ export default function DrawingCanvas({
   selectedColor,
   grid,
   activeLayerGrid,
-  belowActiveLayerGrid,
-  aboveActiveLayerGrid,
+  layers,
+  activeLayerIndex,
   onPixelFill,
   tool,
   selection,
@@ -119,22 +119,6 @@ export default function DrawingCanvas({
   const getPixelColor = (row: number, col: number): string => {
     const key = getPixelKey(row, col)
     return grid[key] || '#ffffff'
-  }
-
-  // For the moving-selection "hole": sits on the same opaque white "paper"
-  // as the base canvas, so an empty cell here (nothing on any other layer)
-  // correctly falls back to white rather than 'transparent'.
-  const getBelowActiveLayerPixelColor = (row: number, col: number): string => {
-    const key = getPixelKey(row, col)
-    return belowActiveLayerGrid[key] || '#ffffff'
-  }
-
-  // No fallback: `undefined` here means "nothing above the active layer at
-  // this cell", distinct from a painted-but-white cell, so the caller can
-  // tell whether to let it take over from the dragged color.
-  const getAboveActiveLayerPixelColor = (row: number, col: number): string | undefined => {
-    const key = getPixelKey(row, col)
-    return aboveActiveLayerGrid[key]
   }
 
   const getActiveLayerPixelColor = (row: number, col: number): string => {
@@ -629,6 +613,26 @@ export default function DrawingCanvas({
     const width = selection.endCol - selection.startCol + 1
     const height = selection.endRow - selection.startRow + 1
 
+    // Computed here, inside the same isMovingSelection-gated effect that
+    // uses them, rather than as props eagerly derived from `selection` in
+    // the parent - `selection` goes non-null as soon as the user starts
+    // drawing the initial marquee, well before any move begins, so
+    // composites recomputed on every marquee-drag mousemove would still
+    // redo this work (up to canvasWidth*canvasHeight*layerCount cell
+    // visits at the editor's limits) for a preview nothing reads yet.
+    const belowActiveLayerGrid = compositeLayers(layers.filter((_, i) => i !== activeLayerIndex))
+    const aboveActiveLayerGrid = compositeLayers(layers.slice(activeLayerIndex + 1))
+    // For the moving-selection "hole": sits on the same opaque white
+    // "paper" as the base canvas, so an empty cell here (nothing on any
+    // other layer) correctly falls back to white rather than 'transparent'.
+    const getBelowActiveLayerPixelColor = (row: number, col: number): string =>
+      belowActiveLayerGrid[getPixelKey(row, col)] || '#ffffff'
+    // No fallback: `undefined` here means "nothing above the active layer
+    // at this cell", distinct from a painted-but-white cell, so the caller
+    // can tell whether to let it take over from the dragged color.
+    const getAboveActiveLayerPixelColor = (row: number, col: number): string | undefined =>
+      aboveActiveLayerGrid[getPixelKey(row, col)]
+
     // The backing store is one pixel per cell (not pixelSize per cell) and
     // scaled up to the on-screen size via CSS instead - at the maximum
     // canvas size and pixelSize (500 cells x 50px), a pixelSize-scaled
@@ -678,7 +682,7 @@ export default function DrawingCanvas({
         })
       })
     }
-  }, [isSelectMode, selection, isMovingSelection, belowActiveLayerGrid, aboveActiveLayerGrid, pixelSize, moveDelta])
+  }, [isSelectMode, selection, isMovingSelection, layers, activeLayerIndex, pixelSize, moveDelta])
 
   const renderSquare = (row: number, col: number) => {
     return (
