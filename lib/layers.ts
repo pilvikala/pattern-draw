@@ -137,7 +137,19 @@ function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight:
   const grid: { [key: string]: string } = {}
   if (!rawGrid || typeof rawGrid !== 'object') return grid
 
-  for (const [key, value] of Object.entries(rawGrid as Record<string, unknown>)) {
+  // A crafted payload can carry millions of raw keys regardless of the
+  // canvas's real size (e.g. mostly out-of-bounds coordinates) -
+  // Object.entries would materialize all of them into an array before any
+  // per-entry check below ever runs. for...in visits one at a time instead,
+  // so the maxEntries break can actually stop the work early rather than
+  // just capping the *result* after the full scan already happened.
+  const record = rawGrid as Record<string, unknown>
+  const maxEntries = canvasWidth * canvasHeight
+  let count = 0
+  for (const key in record) {
+    if (count >= maxEntries) break
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+    const value = record[key]
     if (typeof value !== 'string' || !value) continue
     const match = GRID_KEY_PATTERN.exec(key)
     if (!match) continue
@@ -152,8 +164,12 @@ function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight:
     // never rendered, never selectable, yet still retained and counted -
     // and several such aliases of one cell would also bypass the "at most
     // canvasWidth * canvasHeight entries" bound that relies on one entry
-    // per real, canonically-addressed cell.
-    grid[`${row},${col}`] = value
+    // per real, canonically-addressed cell. Counting only *new* canonical
+    // keys (not every accepted entry) keeps that bound accurate even when
+    // aliases of an already-seen cell appear before the count is reached.
+    const canonicalKey = `${row},${col}`
+    if (!(canonicalKey in grid)) count++
+    grid[canonicalKey] = value
   }
   return grid
 }

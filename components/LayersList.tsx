@@ -96,6 +96,7 @@ export default function LayersList({
                   className={styles.nameInput}
                   value={editingName}
                   autoFocus
+                  aria-label="Layer name"
                   onChange={(e) => setEditingName(e.target.value)}
                   onBlur={commitEditing}
                   onKeyDown={(e) => {
@@ -122,6 +123,14 @@ export default function LayersList({
               )}
 
               <div className={styles.rowActions}>
+                <button
+                  className={styles.iconButton}
+                  onClick={() => startEditing(layer)}
+                  aria-label="Rename layer"
+                  title="Rename layer"
+                >
+                  ✎
+                </button>
                 <button
                   className={styles.iconButton}
                   disabled={!canMoveUp}

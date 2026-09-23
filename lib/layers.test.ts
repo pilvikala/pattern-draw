@@ -344,6 +344,27 @@ describe('normalizeDrawingData', () => {
     expect(Object.keys(result.layers[0].grid)).toEqual(['0,1'])
   })
 
+  it('bounds a raw grid with a huge number of entries instead of visiting every one', () => {
+    // A crafted payload's grid object can carry far more raw keys than the
+    // canvas could ever legitimately hold (e.g. mostly out-of-bounds
+    // coordinates) - Object.entries would materialize an array of all of
+    // them before any per-entry check runs. This asserts the *result* stays
+    // correctly bounded and correct despite the huge input, and (mainly)
+    // that this completes quickly rather than hanging - a naive
+    // materialize-then-filter implementation would also produce a correct
+    // result here, just after doing far more work to get there.
+    const hugeGrid: Record<string, string> = {}
+    for (let i = 0; i < 500_000; i++) hugeGrid[`${i + 1000},${i + 1000}`] = '#ff0000' // all out of bounds
+    hugeGrid['2,2'] = '#00ff00' // the one legitimately in-bounds cell
+    const raw = {
+      canvasWidth: 5,
+      canvasHeight: 5,
+      layers: [{ id: 'a', name: 'Layer 1', visible: true, grid: hugeGrid }],
+    }
+    const result = normalizeDrawingData(raw)
+    expect(result.layers[0].grid).toEqual({ '2,2': '#00ff00' })
+  })
+
   it('drops malformed grid keys and non-string values', () => {
     const raw = {
       canvasWidth: 5,

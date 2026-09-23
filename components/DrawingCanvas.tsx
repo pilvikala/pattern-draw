@@ -48,8 +48,14 @@ interface DrawingCanvasProps {
   // Composite of every *other* visible layer (everything except the active
   // one) - used to render the moving-selection "hole" left at the original
   // position, so it shows what's actually still there (other layers) rather
-  // than a flat color standing in for "empty".
+  // than a flat color standing in for "empty", and to preview a transparent
+  // moved cell's destination.
   belowActiveLayerGrid: { [key: string]: string }
+  // Composite of only the visible layers stacked above the active one -
+  // used to preview an opaque moved cell's destination, since a layer
+  // above the active one stays on top after the drop regardless of what
+  // the active layer's own content becomes there.
+  aboveActiveLayerGrid: { [key: string]: string }
   onPixelFill: (key: string, color: string) => void
   tool: Tool
   selection: SelectionRect | null
@@ -66,6 +72,7 @@ export default function DrawingCanvas({
   grid,
   activeLayerGrid,
   belowActiveLayerGrid,
+  aboveActiveLayerGrid,
   onPixelFill,
   tool,
   selection,
@@ -120,6 +127,14 @@ export default function DrawingCanvas({
   const getBelowActiveLayerPixelColor = (row: number, col: number): string => {
     const key = getPixelKey(row, col)
     return belowActiveLayerGrid[key] || '#ffffff'
+  }
+
+  // No fallback: `undefined` here means "nothing above the active layer at
+  // this cell", distinct from a painted-but-white cell, so the caller can
+  // tell whether to let it take over from the dragged color.
+  const getAboveActiveLayerPixelColor = (row: number, col: number): string | undefined => {
+    const key = getPixelKey(row, col)
+    return aboveActiveLayerGrid[key]
   }
 
   const getActiveLayerPixelColor = (row: number, col: number): string => {
@@ -646,19 +661,24 @@ export default function DrawingCanvas({
           // actually produce. Rendering it against the non-active-layer
           // composite at the destination previews the real post-drop
           // result instead.
+          const destRow = selection.startRow + r + moveDelta.dRow
+          const destCol = selection.startCol + c + moveDelta.dCol
           if (color === 'transparent') {
-            floatingCtx.fillStyle = getBelowActiveLayerPixelColor(
-              selection.startRow + r + moveDelta.dRow,
-              selection.startCol + c + moveDelta.dCol
-            )
+            floatingCtx.fillStyle = getBelowActiveLayerPixelColor(destRow, destCol)
           } else {
-            floatingCtx.fillStyle = color
+            // A layer above the active one keeps covering this cell after
+            // the drop regardless of what the active layer's own content
+            // becomes there - compositeLayers always lets it win. Without
+            // this check, the dragged color would render on top of
+            // everything during the preview even where it's about to be
+            // hidden again once dropped.
+            floatingCtx.fillStyle = getAboveActiveLayerPixelColor(destRow, destCol) || color
           }
           floatingCtx.fillRect(c, r, 1, 1)
         })
       })
     }
-  }, [isSelectMode, selection, isMovingSelection, belowActiveLayerGrid, pixelSize, moveDelta])
+  }, [isSelectMode, selection, isMovingSelection, belowActiveLayerGrid, aboveActiveLayerGrid, pixelSize, moveDelta])
 
   const renderSquare = (row: number, col: number) => {
     return (
