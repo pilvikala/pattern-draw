@@ -365,6 +365,26 @@ describe('normalizeDrawingData', () => {
     expect(result.layers[0].grid).toEqual({ '2,2': '#00ff00' })
   })
 
+  it('bounds the raw scan itself when the payload is almost entirely malformed keys', () => {
+    // The distinct-canonical-key counter alone never reaches maxEntries
+    // when the payload is mostly garbage (no key is ever accepted), so it
+    // can't stop for...in from still walking every one of potentially
+    // millions of keys - a separate raw-scan cap is needed. This proves
+    // that cap is enforced: a valid entry placed after the scan limit is
+    // never reached and is silently dropped, which is exactly what a real
+    // (very large) crafted payload would also do.
+    const hugeGrid: Record<string, string> = {}
+    for (let i = 0; i < 1_000_000; i++) hugeGrid[`bad-key-${i}`] = '#ff0000' // never a valid "row,col" key
+    hugeGrid['2,2'] = '#00ff00' // valid, but placed after the raw-scan cap
+    const raw = {
+      canvasWidth: 5,
+      canvasHeight: 5,
+      layers: [{ id: 'a', name: 'Layer 1', visible: true, grid: hugeGrid }],
+    }
+    const result = normalizeDrawingData(raw)
+    expect(result.layers[0].grid).toEqual({})
+  })
+
   it('drops malformed grid keys and non-string values', () => {
     const raw = {
       canvasWidth: 5,

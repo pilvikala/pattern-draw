@@ -133,6 +133,17 @@ export const MAX_LAYERS = 50
 // canvasHeight entries, since out-of-range and malformed keys are dropped.
 const GRID_KEY_PATTERN = /^(-?\d+),(-?\d+)$/
 
+// A raw grid crafted entirely (or mostly) out of malformed/out-of-bounds
+// keys never grows `count` past canvasWidth*canvasHeight, so that check
+// alone can't stop for...in from still walking every one of them - a
+// payload of, say, 5,000,000 "99999,99999"-style keys costs a full linear
+// scan regardless of how few (or none) turn out valid. This second, raw
+// counter bounds the scan itself, independent of how many entries pass.
+// Generous relative to any real drawing's needs (canvasWidth*canvasHeight
+// tops out at MAX_CANVAS_DIMENSION^2 = 250,000) so it only ever kicks in
+// for a payload with drastically more raw keys than valid cells.
+const MAX_RAW_GRID_ENTRIES_TO_SCAN = 1_000_000
+
 function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight: number): { [key: string]: string } {
   const grid: { [key: string]: string } = {}
   if (!rawGrid || typeof rawGrid !== 'object') return grid
@@ -146,8 +157,10 @@ function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight:
   const record = rawGrid as Record<string, unknown>
   const maxEntries = canvasWidth * canvasHeight
   let count = 0
+  let scanned = 0
   for (const key in record) {
-    if (count >= maxEntries) break
+    if (count >= maxEntries || scanned >= MAX_RAW_GRID_ENTRIES_TO_SCAN) break
+    scanned++
     if (!Object.prototype.hasOwnProperty.call(record, key)) continue
     const value = record[key]
     if (typeof value !== 'string' || !value) continue
