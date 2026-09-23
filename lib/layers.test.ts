@@ -81,6 +81,20 @@ describe('clampActiveLayerIndex', () => {
   it('returns 0 for an empty layer list', () => {
     expect(clampActiveLayerIndex(0, 0)).toBe(0)
   })
+
+  it('truncates a fractional index instead of leaving it non-integer', () => {
+    // layers[1.5] is always undefined, regardless of how it got clamped -
+    // a malformed `activeLayerIndex: 1.5` from localStorage/API data must
+    // resolve to a real, usable layer index.
+    expect(clampActiveLayerIndex(1.5, 3)).toBe(1)
+    expect(clampActiveLayerIndex(2.9, 3)).toBe(2)
+  })
+
+  it('falls back to 0 for a non-finite index (NaN/Infinity)', () => {
+    expect(clampActiveLayerIndex(NaN, 3)).toBe(0)
+    expect(clampActiveLayerIndex(Infinity, 3)).toBe(2)
+    expect(clampActiveLayerIndex(-Infinity, 3)).toBe(0)
+  })
 })
 
 describe('mergeLayerDown', () => {

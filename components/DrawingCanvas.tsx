@@ -86,6 +86,12 @@ export default function DrawingCanvas({
   const moveStartRef = useRef<{ row: number; col: number } | null>(null)
   const [moveDelta, setMoveDelta] = useState({ dRow: 0, dCol: 0 })
   const movingSnapshotRef = useRef<string[][] | null>(null)
+  // The hole (what's left behind) and the floating preview (what's being
+  // dragged) are drawn onto <canvas> elements rather than one <div> per
+  // cell - at the max 500x500 canvas size, selecting the whole thing would
+  // otherwise create 250,000 DOM nodes per overlay on every drag frame.
+  const holeCanvasRef = useRef<HTMLCanvasElement>(null)
+  const floatingCanvasRef = useRef<HTMLCanvasElement>(null)
   const [zoom, setZoom] = useState(1.0)
   const containerRef = useRef<HTMLDivElement>(null)
   const zoomContainerRef = useRef<HTMLDivElement>(null)
@@ -593,6 +599,39 @@ export default function DrawingCanvas({
     }
   }, [handleTouchStart, handleTouchMove, handleTouchEnd])
 
+  // Paints the hole (layers below the active one, at the selection's
+  // original position) and the floating preview (the active layer's
+  // dragged content) onto their canvases. Both only need repainting when
+  // the drag starts or the underlying colors change - not on every
+  // moveDelta update, since that only moves the floating canvas via CSS.
+  useEffect(() => {
+    if (!isSelectMode || !selection || !isMovingSelection) return
+    const width = selection.endCol - selection.startCol + 1
+    const height = selection.endRow - selection.startRow + 1
+
+    const holeCtx = holeCanvasRef.current?.getContext('2d')
+    if (holeCtx) {
+      holeCtx.clearRect(0, 0, width * pixelSize, height * pixelSize)
+      for (let r = 0; r < height; r++) {
+        for (let c = 0; c < width; c++) {
+          holeCtx.fillStyle = getBelowActiveLayerPixelColor(selection.startRow + r, selection.startCol + c)
+          holeCtx.fillRect(c * pixelSize, r * pixelSize, pixelSize, pixelSize)
+        }
+      }
+    }
+
+    const floatingCtx = floatingCanvasRef.current?.getContext('2d')
+    if (floatingCtx && movingSnapshotRef.current) {
+      floatingCtx.clearRect(0, 0, width * pixelSize, height * pixelSize)
+      movingSnapshotRef.current.forEach((rowColors, r) => {
+        rowColors.forEach((color, c) => {
+          floatingCtx.fillStyle = color
+          floatingCtx.fillRect(c * pixelSize, r * pixelSize, pixelSize, pixelSize)
+        })
+      })
+    }
+  }, [isSelectMode, selection, isMovingSelection, belowActiveLayerGrid, pixelSize])
+
   const renderSquare = (row: number, col: number) => {
     return (
       <Pixel
@@ -724,54 +763,36 @@ export default function DrawingCanvas({
 
           {isSelectMode && selection && isMovingSelection && movingSnapshotRef.current && (
             <>
-              <div
+              {/* Renders the other (non-active) layers for this rect onto a
+                  canvas - not one <div> per cell - so the hole left by the
+                  active layer's content actually shows what's really
+                  underneath (rather than standing in a fake "empty" color)
+                  without creating up to 250,000 DOM nodes on a full-canvas
+                  selection. The drawing effect above paints its pixels. */}
+              <canvas
+                ref={holeCanvasRef}
                 className={styles.selectionHole}
+                width={(selection.endCol - selection.startCol + 1) * pixelSize}
+                height={(selection.endRow - selection.startRow + 1) * pixelSize}
                 style={{
                   left: `${selection.startCol * pixelSize}px`,
                   top: `${selection.startRow * pixelSize}px`,
                   width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
                   height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
-                  display: 'grid',
-                  gridTemplateColumns: `repeat(${selection.endCol - selection.startCol + 1}, ${pixelSize}px)`,
-                  gridTemplateRows: `repeat(${selection.endRow - selection.startRow + 1}, ${pixelSize}px)`,
                 }}
-              >
-                {/* Renders the other (non-active) layers for this rect,
-                    rather than a flat overlay color, so the hole left by
-                    the active layer's content actually shows what's really
-                    underneath instead of standing in a fake "empty" color. */}
-                {Array.from({ length: selection.endRow - selection.startRow + 1 }).map((_, r) =>
-                  Array.from({ length: selection.endCol - selection.startCol + 1 }).map((_, c) => (
-                    <div
-                      key={`${r},${c}`}
-                      className={styles.selectionHoleCell}
-                      style={{ backgroundColor: getBelowActiveLayerPixelColor(selection.startRow + r, selection.startCol + c) }}
-                    />
-                  ))
-                )}
-              </div>
-              <div
+              />
+              <canvas
+                ref={floatingCanvasRef}
                 className={styles.selectionFloating}
+                width={(selection.endCol - selection.startCol + 1) * pixelSize}
+                height={(selection.endRow - selection.startRow + 1) * pixelSize}
                 style={{
                   left: `${(selection.startCol + moveDelta.dCol) * pixelSize}px`,
                   top: `${(selection.startRow + moveDelta.dRow) * pixelSize}px`,
                   width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
                   height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
-                  display: 'grid',
-                  gridTemplateColumns: `repeat(${selection.endCol - selection.startCol + 1}, ${pixelSize}px)`,
-                  gridTemplateRows: `repeat(${selection.endRow - selection.startRow + 1}, ${pixelSize}px)`,
                 }}
-              >
-                {movingSnapshotRef.current.map((rowColors, r) =>
-                  rowColors.map((color, c) => (
-                    <div
-                      key={`${r},${c}`}
-                      className={styles.selectionFloatingCell}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))
-                )}
-              </div>
+              />
             </>
           )}
         </div>

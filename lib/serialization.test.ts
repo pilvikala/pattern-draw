@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { serializeDrawing, deserializeDrawing, encodeDrawing, decodeDrawing, compressColor, decompressColor, MAX_COMPACT_STRING_LENGTH } from './serialization'
+import { serializeDrawing, deserializeDrawing, encodeDrawing, decodeDrawing, compressColor, decompressColor, MAX_COMPACT_STRING_LENGTH, parseCappedColorList, MAX_COLOR_LIST_ENTRIES } from './serialization'
 import { normalizeDrawingData } from './layers'
 import type { DrawingData, Layer } from '@/lib/types'
 
@@ -117,6 +117,25 @@ describe('serializeDrawing / deserializeDrawing (v2, layer-aware)', () => {
   it('returns null for invalid format (too few parts)', () => {
     expect(deserializeDrawing('s|15|20|20')).toBeNull()
   })
+
+  it('round-trips a shorthand hex color painted directly (e.g. typed into the hex field) without corruption', () => {
+    const data = drawing({
+      layers: [{ id: 'l1', name: 'Layer 1', visible: true, grid: { '0,0': '#fff', '1,1': '#f0a' } }],
+    })
+    const result = deserializeDrawing(serializeDrawing(data))
+    expect(result?.layers[0].grid).toEqual({ '0,0': '#ffffff', '1,1': '#ff00aa' })
+  })
+
+  it('round-trips many distinct colors correctly (exercises the Map-based color index lookup)', () => {
+    const grid: { [key: string]: string } = {}
+    for (let i = 0; i < 50; i++) {
+      const hex = `#${i.toString(16).padStart(6, '0')}`
+      grid[`${Math.floor(i / 10)},${i % 10}`] = hex // keeps every cell within the default 20x20 canvas
+    }
+    const data = drawing({ layers: [{ id: 'l1', name: 'Layer 1', visible: true, grid }] })
+    const result = deserializeDrawing(serializeDrawing(data))
+    expect(result?.layers[0].grid).toEqual(grid)
+  })
 })
 
 describe('deserializeDrawing backward compatibility (legacy v1 single-grid format)', () => {
@@ -159,6 +178,16 @@ describe('compressColor', () => {
 
   it('should compress different color string to a number', () => {
     expect(compressColor('#3a6ea5')).toBe('3a6ea5')
+  })
+
+  it('canonicalizes 3-digit shorthand hex before compressing, so it round-trips correctly', () => {
+    // "#fff" must expand to "#ffffff" (each digit duplicated), not be
+    // parsed/padded as if it were a truncated 6-digit value - otherwise
+    // decompressColor would turn it into "#000fff" instead.
+    expect(compressColor('#fff')).toBe(compressColor('#ffffff'))
+    expect(decompressColor(compressColor('#fff'))).toBe('#ffffff')
+    expect(decompressColor(compressColor('#f0a'))).toBe('#ff00aa')
+    expect(decompressColor(compressColor('#000'))).toBe('#000000')
   })
 })
 
@@ -234,6 +263,38 @@ describe('decodeDrawing security bounds (compact-format path)', () => {
     expect(result).not.toBeNull()
     expect(result!.canvasWidth).toBeLessThanOrEqual(500)
     expect(result!.canvasHeight).toBeLessThanOrEqual(500)
+  })
+
+  it('bounds a legacy payload with many comma-separated colors instead of materializing them all', () => {
+    // Well over MAX_COLOR_LIST_ENTRIES (10,000) but comfortably under
+    // MAX_COMPACT_STRING_LENGTH so this exercises the color-list cap
+    // specifically, not the outer whole-string guard tested elsewhere.
+    const manyZeros = new Array(50_000).fill('0').join(',')
+    const compact = `v2|s|15|20|20|0|${manyZeros}|${manyZeros}|`
+    const result = deserializeDrawing(compact)
+    expect(result).not.toBeNull()
+  })
+})
+
+describe('parseCappedColorList', () => {
+  it('caps the split at MAX_COLOR_LIST_ENTRIES instead of materializing every entry', () => {
+    // The 10MB whole-string guard alone doesn't stop a payload that packs
+    // millions of short entries into just the color-list field - this has
+    // to be capped while splitting itself, not just downstream by
+    // normalizeDrawingData's 200-entry saved-colors cap (which would mask
+    // whether this parse-time bound ran at all, since both a fixed and an
+    // unfixed version end up at <=200 once normalized).
+    const millionZeros = new Array(3_000_000).fill('0').join(',')
+    expect(parseCappedColorList(millionZeros).length).toBe(MAX_COLOR_LIST_ENTRIES)
+  })
+
+  it('handles undefined and empty input', () => {
+    expect(parseCappedColorList(undefined)).toEqual([])
+    expect(parseCappedColorList('')).toEqual([])
+  })
+
+  it('filters out empty entries (leading/trailing/doubled commas)', () => {
+    expect(parseCappedColorList('a,,b,')).toEqual(['a', 'b'])
   })
 })
 

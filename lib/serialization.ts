@@ -11,6 +11,23 @@ import { createLayer, createLayerId, migrateGridToLayers, normalizeDrawingData, 
 // is MAX_CANVAS_DIMENSION^2, so this never rejects a real drawing.
 const MAX_GRID_ENTRIES_PER_LAYER = MAX_CANVAS_DIMENSION * MAX_CANVAS_DIMENSION
 
+// Bounds the comma-separated saved-color/all-color lists while parsing, for
+// the same reason as MAX_GRID_ENTRIES_PER_LAYER above: the 10MB compact-size
+// guard doesn't stop a crafted legacy payload from putting millions of
+// entries in a single one of these fields, and normalizeDrawingData's own
+// 200-entry cap on saved colors only applies *after* this split/map/reduce
+// has already materialized the full array/object. Split's own `limit`
+// argument stops early rather than building the whole array first.
+// Exported so tests can assert the cap directly - downstream normalization
+// (normalizeDrawingData's 200-entry saved-colors cap) would otherwise mask
+// whether this parse-time bound actually ran, since both a fixed and an
+// unfixed version end up at <=200 once normalized.
+export const MAX_COLOR_LIST_ENTRIES = 10_000
+
+export function parseCappedColorList(raw: string | undefined): string[] {
+  return raw ? raw.split(',', MAX_COLOR_LIST_ENTRIES).filter(Boolean) : []
+}
+
 // Bounds the raw string before any parsing touches it. The per-field caps
 // above only kick in once compact.split('|') (and each layer's grid
 // .split(';')) has already materialized an array with one element per
@@ -116,6 +133,10 @@ export function serializeDrawing(data: DrawingData): string {
     }
   }
   const allColorsArraySorted = Object.keys(colorFrequency).sort((a, b) => colorFrequency[b] - colorFrequency[a])
+  // indexOf would rescan the whole palette per painted cell (O(paintedCells
+  // * uniqueColors)) - a Map built once makes each lookup O(1), which
+  // matters since this runs synchronously on the share-link and save paths.
+  const colorIndexByCompressed = new Map(allColorsArraySorted.map((c, i) => [c, i]))
 
   const layerFields: string[] = []
   for (const layer of data.layers) {
@@ -123,7 +144,7 @@ export function serializeDrawing(data: DrawingData): string {
     for (const key in layer.grid) {
       const color = layer.grid[key]
       if (!color) continue
-      gridEntries.push(`${key}:${allColorsArraySorted.indexOf(compressColor(color))}`)
+      gridEntries.push(`${key}:${colorIndexByCompressed.get(compressColor(color))}`)
     }
     layerFields.push(encodeURIComponent(layer.name), layer.visible ? '1' : '0', gridEntries.join(';'))
   }
@@ -182,13 +203,13 @@ function deserializeV1(parts: string[]): DrawingData | null {
   const canvasWidth = parseInt(parts[2]) || 20
   const canvasHeight = parseInt(parts[3]) || 20
 
-  const savedColorsArray = parts[4] ? parts[4].split(',').filter(Boolean) : []
+  const savedColorsArray = parseCappedColorList(parts[4])
   const colors = savedColorsArray.map(decompressColor).reduce((acc, color, idx) => {
     acc[idx.toString()] = color
     return acc
   }, {} as { [key: string]: string })
 
-  const allColorsArray = parts[5] ? parts[5].split(',').filter(Boolean) : []
+  const allColorsArray = parseCappedColorList(parts[5])
   const allColors = allColorsArray.map(decompressColor).reduce((acc, color, idx) => {
     acc[idx.toString()] = color
     return acc
@@ -227,13 +248,13 @@ function deserializeV2(parts: string[]): DrawingData | null {
   const canvasHeight = parseInt(parts[4]) || 20
   const activeLayerIndexRaw = parseInt(parts[5]) || 0
 
-  const savedColorsArray = parts[6] ? parts[6].split(',').filter(Boolean) : []
+  const savedColorsArray = parseCappedColorList(parts[6])
   const colors = savedColorsArray.map(decompressColor).reduce((acc, color, idx) => {
     acc[idx.toString()] = color
     return acc
   }, {} as { [key: string]: string })
 
-  const allColorsArray = parts[7] ? parts[7].split(',').filter(Boolean) : []
+  const allColorsArray = parseCappedColorList(parts[7])
   const allColors = allColorsArray.map(decompressColor).reduce((acc, color, idx) => {
     acc[idx.toString()] = color
     return acc
@@ -393,8 +414,23 @@ export async function decodeDrawing(encoded: string): Promise<DrawingData | null
   }
 }
 
+// Expands 3-digit shorthand hex ("#fff") to its 6-digit form ("#ffffff") by
+// duplicating each digit - the correct expansion per the CSS shorthand hex
+// spec. Without this, compressColor would parseInt "fff" directly (4095),
+// and decompressColor's 6-digit zero-pad would then turn that back into
+// "#000fff" - a different color than what was painted, silently corrupting
+// any shorthand hex value that reaches serialization (e.g. typed directly
+// into the hex text field) on share/reload.
+function canonicalizeHexColor(color: string): string {
+  const hex = color.replace('#', '')
+  if (hex.length === 3) {
+    return `#${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
+  }
+  return color
+}
+
 export function compressColor(color: string): string {
-  const num = parseInt(color.replace('#', ''), 16)
+  const num = parseInt(canonicalizeHexColor(color).replace('#', ''), 16)
   return num.toString(16)
 }
 

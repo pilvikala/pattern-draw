@@ -38,7 +38,15 @@ export function migrateGridToLayers(grid: { [key: string]: string } | undefined)
 
 export function clampActiveLayerIndex(index: number, layerCount: number): number {
   if (layerCount <= 0) return 0
-  return Math.max(0, Math.min(index, layerCount - 1))
+  // Normalize before clamping - a non-integer index (e.g. `activeLayerIndex:
+  // 1.5` from malformed localStorage/API data) would otherwise survive the
+  // clamp unchanged, and layers[fractionalIndex] is always undefined:
+  // updateActiveLayerGrid then silently finds no target layer to paint on.
+  // Only NaN needs an explicit fallback - Math.trunc(Infinity) is still
+  // Infinity, so +/-Infinity clamp naturally via min/max below, the same as
+  // any other out-of-range value.
+  const safeIndex = Number.isNaN(index) ? 0 : Math.trunc(index)
+  return Math.max(0, Math.min(safeIndex, layerCount - 1))
 }
 
 // Merges the layer with `sourceId` into the layer directly below it. The
