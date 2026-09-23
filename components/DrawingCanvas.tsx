@@ -601,9 +601,14 @@ export default function DrawingCanvas({
 
   // Paints the hole (layers below the active one, at the selection's
   // original position) and the floating preview (the active layer's
-  // dragged content) onto their canvases. Both only need repainting when
-  // the drag starts or the underlying colors change - not on every
-  // moveDelta update, since that only moves the floating canvas via CSS.
+  // dragged content) onto their canvases. The hole only needs repainting
+  // when the drag starts or the underlying colors change - its position
+  // never moves. The floating preview's transparent cells do need
+  // repainting on every moveDelta change: they're rendered against the
+  // non-active-layer composite *at the destination*, which shifts as the
+  // selection is dragged (see the comment below the transparent-color
+  // check), so this effect also depends on moveDelta despite the extra
+  // repaint cost while dragging.
   useEffect(() => {
     if (!isSelectMode || !selection || !isMovingSelection) return
     const width = selection.endCol - selection.startCol + 1
@@ -632,12 +637,28 @@ export default function DrawingCanvas({
       floatingCtx.clearRect(0, 0, width, height)
       movingSnapshotRef.current.forEach((rowColors, r) => {
         rowColors.forEach((color, c) => {
-          floatingCtx.fillStyle = color
+          // A transparent source cell deletes whatever's on the active
+          // layer at the destination when the move is dropped (see
+          // pasteClipboardToGrid's TRANSPARENT handling) - leaving it
+          // fully see-through here would instead let the destination's
+          // *current* (pre-drop) active-layer content show through during
+          // the drag, which can visually differ from what the drop will
+          // actually produce. Rendering it against the non-active-layer
+          // composite at the destination previews the real post-drop
+          // result instead.
+          if (color === 'transparent') {
+            floatingCtx.fillStyle = getBelowActiveLayerPixelColor(
+              selection.startRow + r + moveDelta.dRow,
+              selection.startCol + c + moveDelta.dCol
+            )
+          } else {
+            floatingCtx.fillStyle = color
+          }
           floatingCtx.fillRect(c, r, 1, 1)
         })
       })
     }
-  }, [isSelectMode, selection, isMovingSelection, belowActiveLayerGrid, pixelSize])
+  }, [isSelectMode, selection, isMovingSelection, belowActiveLayerGrid, pixelSize, moveDelta])
 
   const renderSquare = (row: number, col: number) => {
     return (

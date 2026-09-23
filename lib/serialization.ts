@@ -24,8 +24,20 @@ const MAX_GRID_ENTRIES_PER_LAYER = MAX_CANVAS_DIMENSION * MAX_CANVAS_DIMENSION
 // unfixed version end up at <=200 once normalized.
 export const MAX_COLOR_LIST_ENTRIES = 10_000
 
-export function parseCappedColorList(raw: string | undefined): string[] {
-  return raw ? raw.split(',', MAX_COLOR_LIST_ENTRIES).filter(Boolean) : []
+// The full palette of every distinct *painted-cell* color is a different
+// field from the user's saved swatches (which normalizeColors caps at 200)
+// and isn't capped anywhere downstream - a real drawing can paint up to
+// MAX_CANVAS_DIMENSION^2 cells per layer, each a different color, so
+// reusing MAX_COLOR_LIST_ENTRIES here would silently truncate a legitimate
+// drawing's palette: colors beyond the cutoff parse as `undefined`, and
+// normalizeLayerGrid then drops every cell that referenced them - painted
+// pixels quietly disappear on load with no error. This only needs to guard
+// against a maliciously huge list, not a realistic one, so it's set far
+// above anything a real drawing's distinct-color count would reach.
+export const MAX_PAINTED_COLOR_LIST_ENTRIES = 1_000_000
+
+export function parseCappedColorList(raw: string | undefined, limit: number = MAX_COLOR_LIST_ENTRIES): string[] {
+  return raw ? raw.split(',', limit).filter(Boolean) : []
 }
 
 // Bounds the raw string before any parsing touches it. The per-field caps
@@ -209,7 +221,7 @@ function deserializeV1(parts: string[]): DrawingData | null {
     return acc
   }, {} as { [key: string]: string })
 
-  const allColorsArray = parseCappedColorList(parts[5])
+  const allColorsArray = parseCappedColorList(parts[5], MAX_PAINTED_COLOR_LIST_ENTRIES)
   const allColors = allColorsArray.map(decompressColor).reduce((acc, color, idx) => {
     acc[idx.toString()] = color
     return acc
@@ -258,7 +270,7 @@ function deserializeV2(parts: string[]): DrawingData | null {
     return acc
   }, {} as { [key: string]: string })
 
-  const allColorsArray = parseCappedColorList(parts[7])
+  const allColorsArray = parseCappedColorList(parts[7], MAX_PAINTED_COLOR_LIST_ENTRIES)
   const allColors = allColorsArray.map(decompressColor).reduce((acc, color, idx) => {
     acc[idx.toString()] = color
     return acc

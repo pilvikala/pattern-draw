@@ -174,9 +174,21 @@ const MAX_SAVED_COLORS = 200
 function normalizeColors(rawColors: unknown): { [key: string]: string } {
   const colors: { [key: string]: string } = {}
   if (!rawColors || typeof rawColors !== 'object') return colors
-  for (const [key, value] of Object.entries(rawColors as Record<string, unknown>)) {
-    if (Object.keys(colors).length >= MAX_SAVED_COLORS) break
-    if (typeof value === 'string' && value) colors[key] = value
+  const record = rawColors as Record<string, unknown>
+  let count = 0
+  // for...in (with its own hasOwnProperty check) visits properties one at a
+  // time instead of materializing an array of every key/entry up front like
+  // Object.entries/Object.keys would - the only way the break below can
+  // actually stop a crafted payload with millions of color entries from
+  // paying that allocation cost before this cap ever applies.
+  for (const key in record) {
+    if (count >= MAX_SAVED_COLORS) break
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+    const value = record[key]
+    if (typeof value === 'string' && value) {
+      colors[key] = value
+      count++
+    }
   }
   return colors
 }

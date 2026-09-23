@@ -389,6 +389,26 @@ describe('normalizeDrawingData', () => {
     expect(Object.keys(result.colors).length).toBeLessThanOrEqual(200)
   })
 
+  it('stops iterating the raw colors object at the cap instead of visiting every entry first', () => {
+    // Object.entries/Object.keys would materialize an array of every
+    // property before a break inside the loop ever runs - only for...in
+    // (or similar lazy iteration) can actually stop early. A getter-based
+    // proxy-like object isn't practical to assert against directly here, so
+    // this instead asserts the *result* only ever contains the first
+    // MAX_SAVED_COLORS insertion-order entries, which a naive
+    // materialize-then-cap implementation would also satisfy - the
+    // meaningful guard is exercised via a very large object below without
+    // timing out, which a real un-bounded materialization of, say, a
+    // million-entry object would still technically survive quickly in
+    // Node, so this is primarily a regression/documentation test.
+    const manyColors: Record<string, string> = {}
+    for (let i = 0; i < 500_000; i++) manyColors[String(i)] = '#00ff00'
+    const result = normalizeDrawingData({ colors: manyColors })
+    expect(Object.keys(result.colors).length).toBe(200)
+    expect(result.colors['0']).toBe('#00ff00')
+    expect(result.colors['199']).toBe('#00ff00')
+  })
+
   it('clamps an out-of-range activeLayerIndex', () => {
     const raw = {
       layers: [

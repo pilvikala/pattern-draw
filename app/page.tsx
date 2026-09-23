@@ -14,7 +14,7 @@ import LayersDrawer from '@/components/LayersDrawer'
 import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
 import { floodFillGrid } from '@/lib/floodFill'
 import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
-import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, mergeLayerDown, MAX_LAYERS } from '@/lib/layers'
+import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, mergeLayerDown, MAX_LAYERS, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
 import { trimHistoryToBudget } from '@/lib/history'
 import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry } from '@/lib/types'
 import { TRANSPARENT } from '@/lib/types'
@@ -722,7 +722,20 @@ function HomeContent() {
     // which is the entire point of this button. This also always encodes
     // the current in-memory state fresh, so there's no risk of handing out
     // a stale previously-saved version.
-    const encoded = await encodeDrawing(buildDrawingData())
+    const data = buildDrawingData()
+
+    // Cheap preflight before the expensive encode below (JSON-shape work
+    // plus gzip compression) - without it, a drawing near the editor's own
+    // limits (50 layers, 500x500) can freeze this tab for a noticeable
+    // stretch only to be rejected afterward anyway by the URL-length check,
+    // since output that large essentially never compresses under
+    // SAFE_SHARE_URL_LENGTH once base64-encoded.
+    if (totalGridEntryCount(data) > MAX_TOTAL_GRID_ENTRIES) {
+      showToast('This drawing is too large to share as a link.', 'error')
+      return
+    }
+
+    const encoded = await encodeDrawing(data)
     const url = `${window.location.origin}${window.location.pathname}?drawing=${encoded}`
 
     if (url.length > SAFE_SHARE_URL_LENGTH) {

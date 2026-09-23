@@ -13,6 +13,7 @@ export default function LayersDrawer(props: LayersListProps) {
         className={styles.drawerButton}
         onClick={() => setIsOpen(!isOpen)}
         aria-label="Layers"
+        aria-expanded={isOpen}
         title="Layers"
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

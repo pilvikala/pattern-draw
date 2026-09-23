@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { serializeDrawing, deserializeDrawing, encodeDrawing, decodeDrawing, compressColor, decompressColor, MAX_COMPACT_STRING_LENGTH, parseCappedColorList, MAX_COLOR_LIST_ENTRIES } from './serialization'
+import { serializeDrawing, deserializeDrawing, encodeDrawing, decodeDrawing, compressColor, decompressColor, MAX_COMPACT_STRING_LENGTH, parseCappedColorList, MAX_COLOR_LIST_ENTRIES, MAX_PAINTED_COLOR_LIST_ENTRIES } from './serialization'
 import { normalizeDrawingData } from './layers'
 import type { DrawingData, Layer } from '@/lib/types'
 
@@ -288,6 +288,40 @@ describe('decodeDrawing security bounds (compact-format path)', () => {
     const result = deserializeDrawing(compact)
     expect(result).not.toBeNull()
   })
+
+  it('does not truncate a legitimate drawing with more than MAX_COLOR_LIST_ENTRIES distinct painted colors', () => {
+    // A real drawing's saved-swatch palette is separately capped at 200
+    // (normalizeColors), but its *painted-cell* color palette isn't capped
+    // anywhere downstream - a large canvas can legitimately have more
+    // distinct colors than MAX_COLOR_LIST_ENTRIES (10,000). Reusing that
+    // bound for the painted-color list would silently drop every cell
+    // whose color index falls past the cutoff once reloaded.
+    const distinctColors = 12_000
+    const canvasSize = 150 // 150*150 = 22,500 cells, enough for 12,000 unique ones
+    const grid: { [key: string]: string } = {}
+    for (let i = 0; i < distinctColors; i++) {
+      const row = Math.floor(i / canvasSize)
+      const col = i % canvasSize
+      grid[`${row},${col}`] = `#${i.toString(16).padStart(6, '0')}`
+    }
+    const data = drawing({
+      canvasWidth: canvasSize,
+      canvasHeight: canvasSize,
+      layers: [{ id: 'l1', name: 'Layer 1', visible: true, grid }],
+    })
+    const compact = serializeDrawing(data)
+    const result = deserializeDrawing(compact)
+
+    expect(result).not.toBeNull()
+    const resultGrid = result!.layers[0].grid
+    // Every painted cell survives - none dropped due to a truncated
+    // painted-color list.
+    expect(Object.keys(resultGrid).length).toBe(distinctColors)
+    expect(resultGrid['0,0']).toBe('#000000')
+    const lastRow = Math.floor((distinctColors - 1) / canvasSize)
+    const lastCol = (distinctColors - 1) % canvasSize
+    expect(resultGrid[`${lastRow},${lastCol}`]).toBe(`#${(distinctColors - 1).toString(16).padStart(6, '0')}`)
+  })
 })
 
 describe('parseCappedColorList', () => {
@@ -309,6 +343,12 @@ describe('parseCappedColorList', () => {
 
   it('filters out empty entries (leading/trailing/doubled commas)', () => {
     expect(parseCappedColorList('a,,b,')).toEqual(['a', 'b'])
+  })
+
+  it('honors a custom limit argument, for the separate painted-color list bound', () => {
+    expect(parseCappedColorList('a,b,c,d,e', 3)).toEqual(['a', 'b', 'c'])
+    const manyZeros = new Array(50_000).fill('0').join(',')
+    expect(parseCappedColorList(manyZeros, MAX_PAINTED_COLOR_LIST_ENTRIES).length).toBe(50_000)
   })
 })
 
