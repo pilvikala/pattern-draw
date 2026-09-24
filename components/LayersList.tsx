@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Layer } from '@/lib/types'
 import styles from './LayersList.module.css'
 
@@ -42,6 +42,13 @@ export default function LayersList({
   // which isn't reliable across browsers for this unmount-on-state-change
   // pattern - each new editing session simply starts with a clean flag.
   const isCancellingRef = useRef(false)
+  // Tracks each row's name button so focus can return to it once editing
+  // ends (input unmounts, button remounts) - without this, focus falls
+  // out of the list/drawer entirely (to <body>), and a subsequent Escape
+  // press no longer bubbles through the drawer's own key handler to close
+  // it, since the keydown target is no longer inside that DOM subtree.
+  const nameButtonRefs = useRef(new Map<string, HTMLButtonElement | null>())
+  const lastEditedIdRef = useRef<string | null>(null)
 
   const startEditing = (layer: Layer) => {
     isCancellingRef.current = false
@@ -54,13 +61,25 @@ export default function LayersList({
     if (editingId) {
       onRenameLayer(editingId, editingName)
     }
+    lastEditedIdRef.current = editingId
     setEditingId(null)
   }
 
   const cancelEditing = () => {
     isCancellingRef.current = true
+    lastEditedIdRef.current = editingId
     setEditingId(null)
   }
+
+  // Runs after the input->button swap has actually committed to the DOM,
+  // unlike a focus() call inside commitEditing/cancelEditing themselves
+  // (which run before that re-render, while the button doesn't exist yet).
+  useEffect(() => {
+    if (editingId === null && lastEditedIdRef.current) {
+      nameButtonRefs.current.get(lastEditedIdRef.current)?.focus()
+      lastEditedIdRef.current = null
+    }
+  }, [editingId])
 
   // Layers are stored bottom-to-top; the list displays top-to-bottom like a
   // typical layers panel, so it's rendered in reverse array order.
@@ -118,8 +137,19 @@ export default function LayersList({
                   onChange={(e) => setEditingName(e.target.value)}
                   onBlur={commitEditing}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitEditing()
-                    if (e.key === 'Escape') cancelEditing()
+                    // Stop propagation so this doesn't also reach
+                    // LayersDrawer's own onKeyDown, which closes the whole
+                    // drawer on Escape - without this, cancelling a rename
+                    // from inside the mobile drawer unexpectedly dismisses
+                    // the drawer too.
+                    if (e.key === 'Enter') {
+                      e.stopPropagation()
+                      commitEditing()
+                    }
+                    if (e.key === 'Escape') {
+                      e.stopPropagation()
+                      cancelEditing()
+                    }
                   }}
                 />
               ) : (
@@ -129,6 +159,7 @@ export default function LayersList({
                 // key handling needed, and no bubbling conflicts with the
                 // sibling buttons below.
                 <button
+                  ref={(el) => { nameButtonRefs.current.set(layer.id, el) }}
                   type="button"
                   className={styles.name}
                   onClick={() => onSelectLayer(layer.id)}
