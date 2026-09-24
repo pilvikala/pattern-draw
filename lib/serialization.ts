@@ -285,6 +285,15 @@ function deserializeV1(parts: string[]): DrawingData | null {
 }
 
 function deserializeV2(parts: string[]): DrawingData | null {
+  // v2's own fields occupy indices 0-7 (the "v2" tag, pattern, pixelSize,
+  // width, height, activeLayerIndex, savedColors, allColors) before any
+  // layer triples begin at index 8. Fewer parts than that is a truncated/
+  // corrupt payload, not a drawing with zero layers - without this check,
+  // parts[6]/parts[7] read as undefined, the layer-triple loop below never
+  // runs, and the "no layers parsed" fallback then quietly turns it into a
+  // valid blank drawing instead of rejecting it.
+  if (parts.length < 8) return null
+
   const patternChar = parts[1]
   const pattern: MatrixPattern =
     patternChar === 's' ? 'squares' :

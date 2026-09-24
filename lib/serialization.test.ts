@@ -252,6 +252,18 @@ describe('decodeDrawing security bounds (compact-format path)', () => {
     expect(deserializeDrawing(huge)).toBeNull()
   })
 
+  it('rejects a truncated v2 payload instead of silently creating a blank drawing', () => {
+    // v2's own fields occupy indices 0-7 (tag, pattern, pixelSize, width,
+    // height, activeLayerIndex, savedColors, allColors) before any layer
+    // data begins. A payload cut short before the color fields previously
+    // fell through to the "no layers parsed" fallback and was accepted as
+    // a valid (blank) drawing instead of being rejected as corrupt.
+    expect(deserializeDrawing('v2|s|15|20|20|0')).toBeNull()
+    // Exactly at the boundary (8 parts, empty color lists) is a valid,
+    // legitimately empty v2 payload and should still be accepted.
+    expect(deserializeDrawing('v2|s|15|20|20|0||')).not.toBeNull()
+  })
+
   it('deserializeDrawing itself clamps dimensions, not just callers that route through decodeDrawing', () => {
     // The saved-drawings list page and the drawing GET route both call
     // deserializeDrawing directly (not decodeDrawing), so the bound has to

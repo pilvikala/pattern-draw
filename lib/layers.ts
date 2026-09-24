@@ -148,6 +148,17 @@ function isValidHexColor(value: unknown): value is string {
   return typeof value === 'string' && HEX_COLOR_PATTERN.test(value)
 }
 
+// isValidHexColor accepts hex with or without a leading '#' (matching what
+// users can type into the raw color text input), but every consumer of a
+// stored color - DrawingCanvas's `backgroundColor` style, canvas
+// `fillStyle` during export/preview - needs the '#'-prefixed form; "ff0000"
+// isn't a valid CSS/canvas color on its own and would silently fail to
+// render. Canonicalize once here, at the point a color is accepted, so
+// every stored color is guaranteed usable downstream.
+function canonicalizeAcceptedColor(value: string): string {
+  return value.startsWith('#') ? value : `#${value}`
+}
+
 // Shared by normalizeLayerGrid and normalizeColors below: an accepted-entry
 // counter alone can't bound a for...in scan when the payload is crafted
 // entirely (or mostly) out of entries that never get accepted (malformed/
@@ -199,7 +210,7 @@ function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight:
     // aliases of an already-seen cell appear before the count is reached.
     const canonicalKey = `${row},${col}`
     if (!(canonicalKey in grid)) count++
-    grid[canonicalKey] = value
+    grid[canonicalKey] = canonicalizeAcceptedColor(value)
   }
   return grid
 }
@@ -238,7 +249,7 @@ function normalizeColors(rawColors: unknown): { [key: string]: string } {
     if (!Object.prototype.hasOwnProperty.call(record, key)) continue
     const value = record[key]
     if (isValidHexColor(value)) {
-      colors[key] = value
+      colors[key] = canonicalizeAcceptedColor(value)
       count++
     }
   }

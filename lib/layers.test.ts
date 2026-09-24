@@ -444,7 +444,12 @@ describe('normalizeDrawingData', () => {
     expect(result.layers[0].grid).toEqual({ '0,0': '#00ff00' })
   })
 
-  it('accepts both 3-digit and 6-digit hex, with or without a leading #', () => {
+  it('accepts both 3-digit and 6-digit hex, with or without a leading #, and canonicalizes to a # prefix', () => {
+    // "ff0000" without a leading '#' passes the format check but isn't a
+    // valid CSS/canvas color on its own - DrawingCanvas's backgroundColor
+    // style and canvas fillStyle during export both need the '#' form, so
+    // an accepted no-hash color must be canonicalized here rather than
+    // stored verbatim.
     const raw = {
       layers: [{
         id: 'a',
@@ -454,7 +459,12 @@ describe('normalizeDrawingData', () => {
       }],
     }
     const result = normalizeDrawingData(raw)
-    expect(result.layers[0].grid).toEqual({ '0,0': '#f0a', '0,1': 'f0a', '0,2': '#ff00aa', '0,3': 'ff00aa' })
+    expect(result.layers[0].grid).toEqual({ '0,0': '#f0a', '0,1': '#f0a', '0,2': '#ff00aa', '0,3': '#ff00aa' })
+  })
+
+  it('canonicalizes a no-hash saved color to a # prefix too', () => {
+    const result = normalizeDrawingData({ colors: { '0': 'ff0000', '1': '#00ff00' } })
+    expect(result.colors).toEqual({ '0': '#ff0000', '1': '#00ff00' })
   })
 
   it('caps an excessive saved-colors count (rendering DoS guard)', () => {
