@@ -123,6 +123,20 @@ function normalizePixelSize(value: unknown): number {
 // building every layer first and only capping the result afterward.
 export const MAX_LAYERS = 50
 
+// A layer name's TYPE is validated (must be a non-empty string) but its
+// LENGTH previously wasn't - a crafted compact payload could spend nearly
+// the entire 10MB compact-string budget on one name, which then lives on in
+// editor state, gets rendered by LayersList, and gets re-copied into every
+// subsequent autosave/serialization. A layer name is a short UI label, not
+// content, so this is far more generous than any real name would ever need
+// while still bounding the pathological case.
+export const MAX_LAYER_NAME_LENGTH = 100
+
+function normalizeLayerName(value: unknown): string {
+  if (typeof value !== 'string' || !value) return 'Layer'
+  return value.slice(0, MAX_LAYER_NAME_LENGTH)
+}
+
 // Keeps only grid entries that are well-formed ("row,col" keys with a
 // non-empty string color) AND fall inside the canvas - without this, a
 // crafted payload could declare a small canvas but still smuggle millions
@@ -306,7 +320,7 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
       seenIds.add(id)
       return {
         id,
-        name: typeof layer.name === 'string' && layer.name ? layer.name : 'Layer',
+        name: normalizeLayerName(layer.name),
         visible: layer.visible !== false,
         grid: normalizeLayerGrid(layer.grid, canvasWidth, canvasHeight),
       }

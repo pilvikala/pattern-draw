@@ -8,6 +8,7 @@ import {
   mergeLayerDown,
   totalGridEntryCount,
   isDrawingDataShaped,
+  MAX_LAYER_NAME_LENGTH,
 } from './layers'
 import type { Layer } from './types'
 
@@ -228,6 +229,26 @@ describe('normalizeDrawingData', () => {
     expect(result.layers[0].name).toBe('Layer')
     // The well-formed entry is preserved
     expect(result.layers[1]).toMatchObject({ name: 'Real Layer', visible: true, grid: { '0,0': '#ff0000' } })
+  })
+
+  it('caps an excessively long layer name instead of preserving it verbatim', () => {
+    // A layer name's type is validated but its length previously wasn't -
+    // a crafted payload could spend most of the 10MB compact-string budget
+    // on a single name, which then lives on in editor state and gets
+    // re-copied into every subsequent autosave/serialization.
+    const hugeName = 'x'.repeat(1_000_000)
+    const result = normalizeDrawingData({
+      layers: [{ id: 'a', name: hugeName, visible: true, grid: {} }],
+    })
+    expect(result.layers[0].name.length).toBe(MAX_LAYER_NAME_LENGTH)
+    expect(result.layers[0].name).toBe('x'.repeat(MAX_LAYER_NAME_LENGTH))
+  })
+
+  it('leaves a normal-length layer name untouched', () => {
+    const result = normalizeDrawingData({
+      layers: [{ id: 'a', name: 'Background', visible: true, grid: {} }],
+    })
+    expect(result.layers[0].name).toBe('Background')
   })
 
   it('replaces duplicate layer ids with fresh unique ones', () => {

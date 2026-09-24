@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { Layer } from '@/lib/types'
+import { MAX_LAYER_NAME_LENGTH } from '@/lib/layers'
 import styles from './LayersList.module.css'
 
 export interface LayersListProps {
@@ -134,6 +135,7 @@ export default function LayersList({
                   value={editingName}
                   autoFocus
                   aria-label="Layer name"
+                  maxLength={MAX_LAYER_NAME_LENGTH}
                   onChange={(e) => setEditingName(e.target.value)}
                   onBlur={commitEditing}
                   onKeyDown={(e) => {
