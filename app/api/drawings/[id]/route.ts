@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { serializeDrawing, deserializeDrawing } from '@/lib/serialization'
-import type { DrawingData } from '@/lib/types'
+import { serializeDrawing, deserializeDrawing, MAX_COMPACT_STRING_LENGTH, readBoundedRequestBody } from '@/lib/serialization'
+import { normalizeDrawingData, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES, isDrawingDataShaped } from '@/lib/layers'
 
 // GET /api/drawings/[id] - Load a specific drawing
 export async function GET(
@@ -89,10 +89,36 @@ export async function PUT(
         }
 
         const { id } = await params
-        const body = await request.json()
-        const { drawingData } = body
 
-        if (!drawingData) {
+        // Read the body with a byte budget before parsing it as JSON - see
+        // the identical comment in app/api/drawings/route.ts's POST handler.
+        const bodyText = await readBoundedRequestBody(request)
+        if (bodyText === null) {
+            return NextResponse.json(
+                { error: 'Request body is too large' },
+                { status: 413 }
+            )
+        }
+
+        let body: unknown
+        try {
+            body = JSON.parse(bodyText)
+        } catch {
+            return NextResponse.json(
+                { error: 'Invalid JSON body' },
+                { status: 400 }
+            )
+        }
+
+        const { drawingData } = (body && typeof body === 'object' ? body : {}) as { drawingData?: unknown }
+
+        // normalizeDrawingData falls back every field to a default rather
+        // than rejecting unrecognized input, so a truthy-but-wrong-shaped
+        // drawingData (a string, an array, or an object with none of the
+        // expected drawing fields, e.g. `{ drawingData: "bad" }` or `{}`)
+        // would otherwise pass this check and silently overwrite the
+        // existing saved drawing with an empty one instead of returning 400.
+        if (!isDrawingDataShaped(drawingData)) {
             return NextResponse.json(
                 { error: 'Drawing data is required' },
                 { status: 400 }
@@ -123,8 +149,30 @@ export async function PUT(
             )
         }
 
-        // Serialize the drawing data
-        const serialized = serializeDrawing(drawingData as DrawingData)
+        // Normalize before serializing - see the POST route in
+        // app/api/drawings/route.ts for why this can't be skipped.
+        const normalized = normalizeDrawingData(drawingData)
+
+        // Cheap aggregate-size preflight before the expensive serialization
+        // work below - see MAX_TOTAL_GRID_ENTRIES's comment.
+        if (totalGridEntryCount(normalized) > MAX_TOTAL_GRID_ENTRIES) {
+            return NextResponse.json(
+                { error: 'Drawing is too large to save' },
+                { status: 400 }
+            )
+        }
+
+        const serialized = serializeDrawing(normalized)
+
+        // Same aggregate-size guard as the POST route - see
+        // MAX_COMPACT_STRING_LENGTH's comment for why per-layer bounds alone
+        // aren't enough to guarantee a save stays loadable.
+        if (serialized.length > MAX_COMPACT_STRING_LENGTH) {
+            return NextResponse.json(
+                { error: 'Drawing is too large to save' },
+                { status: 400 }
+            )
+        }
 
         const drawing = await prisma.drawing.update({
             where: {

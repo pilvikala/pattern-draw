@@ -9,7 +9,7 @@ describe('normalizeRect', () => {
 })
 
 describe('copySelectionCells', () => {
-  it('extracts a dense snapshot relative to the rect origin, defaulting missing cells to white', () => {
+  it('extracts a dense snapshot relative to the rect origin, defaulting missing cells to transparent', () => {
     const grid = { '1,1': '#ff0000', '1,2': '#00ff00' }
     const rect = { startRow: 1, startCol: 1, endRow: 2, endCol: 2 }
 
@@ -20,8 +20,8 @@ describe('copySelectionCells', () => {
     expect(result.cells).toEqual({
       '0,0': '#ff0000',
       '0,1': '#00ff00',
-      '1,0': '#ffffff',
-      '1,1': '#ffffff',
+      '1,0': '',
+      '1,1': '',
     })
   })
 
@@ -60,13 +60,22 @@ describe('pasteClipboardToGrid', () => {
     expect(result['3,5']).toBe('#00ff00')
   })
 
-  it('treats white clipboard cells as clearing the target (keeps grid sparse)', () => {
+  it('treats transparent clipboard cells as clearing the target (keeps grid sparse)', () => {
+    const grid = { '3,4': '#ff0000' }
+    const clipboard = { width: 1, height: 1, cells: { '0,0': '' } }
+
+    const result = pasteClipboardToGrid(grid, clipboard, 3, 4, 10, 10)
+
+    expect(result['3,4']).toBeUndefined()
+  })
+
+  it('treats an explicit white clipboard cell as a real color, not a clear', () => {
     const grid = { '3,4': '#ff0000' }
     const clipboard = { width: 1, height: 1, cells: { '0,0': '#ffffff' } }
 
     const result = pasteClipboardToGrid(grid, clipboard, 3, 4, 10, 10)
 
-    expect(result['3,4']).toBeUndefined()
+    expect(result['3,4']).toBe('#ffffff')
   })
 
   it('skips cells that fall outside the canvas bounds', () => {

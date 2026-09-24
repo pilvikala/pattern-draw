@@ -1,3 +1,5 @@
+import { TRANSPARENT } from './types'
+
 export function floodFillGrid(
   grid: { [key: string]: string },
   startRow: number,
@@ -19,7 +21,7 @@ export function floodFillGrid(
     if (visited.has(key)) continue
     visited.add(key)
 
-    if ((newGrid[key] || '#ffffff') !== targetColor) continue
+    if ((newGrid[key] || TRANSPARENT) !== targetColor) continue
 
     newGrid[key] = fillColor
     stack.push([row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1])

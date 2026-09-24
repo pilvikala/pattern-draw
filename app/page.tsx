@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
 import { useSession, getSession, signOut } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import DrawingCanvas from '@/components/DrawingCanvas'
@@ -9,10 +9,15 @@ import CompactColorPicker from '@/components/CompactColorPicker'
 import ColorPalette from '@/components/ColorPalette'
 import Controls from '@/components/Controls'
 import MobileMenu from '@/components/MobileMenu'
-import { encodeDrawing, decodeDrawing, serializeDrawing } from '@/lib/serialization'
+import LayersPanel from '@/components/LayersPanel'
+import LayersDrawer from '@/components/LayersDrawer'
+import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
 import { floodFillGrid } from '@/lib/floodFill'
 import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
-import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData } from '@/lib/types'
+import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, mergeLayerDown, MAX_LAYERS, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
+import { trimHistoryToBudget } from '@/lib/history'
+import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry } from '@/lib/types'
+import { TRANSPARENT } from '@/lib/types'
 import UserMenu from '@/components/UserMenu'
 import { useToast } from '@/components/ToastProvider'
 import styles from './page.module.css'
@@ -20,15 +25,21 @@ import styles from './page.module.css'
 // Re-export types for backward compatibility
 export type { MatrixPattern, DrawingData } from '@/lib/types'
 
-// Bounds the undo stack's total memory footprint (roughly this many grid
-// cells summed across all retained snapshots) instead of a flat entry count.
-// A flat cap of 50 doesn't scale down for large canvases - 50 full snapshots
-// of a 500x500 canvas is tens of millions of retained cell entries, which is
-// enough to exhaust a tab's memory during a long drawing session.
-const HISTORY_CELL_BUDGET = 2_000_000
-function getMaxHistoryEntries(canvasWidth: number, canvasHeight: number): number {
-  const cells = canvasWidth * canvasHeight
-  return Math.max(10, Math.min(50, Math.floor(HISTORY_CELL_BUDGET / Math.max(1, cells))))
+// A drawing shared as a URL becomes unwieldy (and risks silent truncation by
+// chat apps, SMS, older proxies, etc.) past roughly this many characters.
+const SAFE_SHARE_URL_LENGTH = 2000
+
+// Prisma's default cuid() ids are alphanumeric; this is intentionally a bit
+// more permissive (covers uuid/nanoid too) while still rejecting anything
+// that could act as a path segment other than a plain opaque id - notably
+// '/', '.', and whitespace. The `?id=` query param is attacker-controlled
+// (an attacker can craft and share a link), and it's interpolated directly
+// into `/api/drawings/${id}` fetch URLs, so an unvalidated value like
+// `../../auth/signout` would resolve (browsers normalize '..' in fetch
+// URLs) to a request against a completely different same-origin endpoint.
+const DRAWING_ID_PATTERN = /^[a-zA-Z0-9_-]+$/
+function isValidDrawingId(id: string): boolean {
+  return DRAWING_ID_PATTERN.test(id)
 }
 
 function HomeContent() {
@@ -44,8 +55,10 @@ function HomeContent() {
   const [canvasHeight, setCanvasHeight] = useState(20)
   const [tempCanvasWidth, setTempCanvasWidth] = useState('20')
   const [tempCanvasHeight, setTempCanvasHeight] = useState('20')
-  const [grid, setGrid] = useState<{ [key: string]: string }>({})
-  const gridRef = useRef<{ [key: string]: string }>({})
+  const [layers, setLayers] = useState<Layer[]>(() => createDefaultLayers())
+  const layersRef = useRef<Layer[]>(layers)
+  const [activeLayerIndex, setActiveLayerIndex] = useState(0)
+  const activeLayerIndexRef = useRef(0)
   // Tracks which ?id= drawing has already been loaded this mount, so a
   // session refetch (periodic or on window focus) doesn't re-trigger the
   // load effect and clobber in-progress edits with the original saved data.
@@ -62,29 +75,42 @@ function HomeContent() {
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
   const [showNewDrawingModal, setShowNewDrawingModal] = useState(false)
 
-  // Undo/Redo history
-  const [history, setHistory] = useState<{ [key: string]: string }[]>([{}])
+  // Undo/Redo history - each entry is a full snapshot of the layer stack
+  // plus which layer was active at that point (see HistoryEntry).
+  const [history, setHistory] = useState<HistoryEntry[]>([{ layers, activeLayerIndex: 0 }])
   const [historyIndex, setHistoryIndex] = useState(0)
   const isUndoRedoRef = useRef(false)
-  const historyRef = useRef<{ [key: string]: string }[]>([{}])
+  const historyRef = useRef<HistoryEntry[]>([{ layers, activeLayerIndex: 0 }])
   const historyIndexRef = useRef(0)
-  const lastSavedGridRef = useRef<{ [key: string]: string }>({})
+  const lastSavedLayersRef = useRef<Layer[]>(layers)
   const historyDebounceTimerRef = useRef<NodeJS.Timeout | null>(null)
   const localStorageDebounceTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const canvasDimsRef = useRef({ width: canvasWidth, height: canvasHeight })
 
-  // Keep grid ref in sync
-  useEffect(() => {
-    gridRef.current = grid
-  }, [grid])
-
-  // Keep canvas dimensions ref in sync (read by the debounced history savers,
-  // which are stable useCallbacks and would otherwise close over stale sizes)
-  useEffect(() => {
-    canvasDimsRef.current = { width: canvasWidth, height: canvasHeight }
-  }, [canvasWidth, canvasHeight])
+  // The flattened view of all visible layers - what's actually drawn on the
+  // canvas and what export/preview render.
+  const compositeGrid = useMemo(() => compositeLayers(layers), [layers])
+  const activeLayer = layers[activeLayerIndex] ?? layers[0]
+  // The moving-selection "hole"/floating-preview composites (everything
+  // except the active layer, and everything above it) are computed inside
+  // DrawingCanvas itself, from the raw `layers`/`activeLayerIndex` passed
+  // down below - not here. `selection` goes non-null as soon as the user
+  // starts drawing the initial marquee, well before any move begins, so a
+  // memo here keyed on `selection` would still redo that composite work
+  // (up to canvasWidth*canvasHeight*layerCount cell visits at the editor's
+  // limits) on every marquee-drag mousemove, for a preview nothing reads
+  // until a move actually starts. Computing it inside DrawingCanvas's own
+  // isMovingSelection-gated effect ties the work to the condition that
+  // actually needs it.
 
   // Keep refs in sync with state
+  useEffect(() => {
+    layersRef.current = layers
+  }, [layers])
+
+  useEffect(() => {
+    activeLayerIndexRef.current = activeLayerIndex
+  }, [activeLayerIndex])
+
   useEffect(() => {
     historyRef.current = history
   }, [history])
@@ -93,94 +119,68 @@ function HomeContent() {
     historyIndexRef.current = historyIndex
   }, [historyIndex])
 
-  // Function to save current grid to history (debounced).
+  // Pushes a new history entry from the current refs, synchronously. Reads
+  // and writes historyRef/historyIndexRef/lastSavedLayersRef directly rather
+  // than going through a setHistory((hist) => ...) functional updater: React
+  // Strict Mode double-invokes functional updaters in dev, and since this
+  // logic both reads and mutates refs as a side effect, a double-invocation
+  // would push two (sometimes divergent) entries for a single logical edit,
+  // corrupting undo/redo. Computing the next array as a plain value and
+  // calling setHistory(newHistory) sidesteps that entirely.
+  const commitHistoryEntry = () => {
+    const currentLayers = layersRef.current
+    const currentIdx = historyIndexRef.current
+    const newHistory = historyRef.current.slice(0, currentIdx + 1)
+    newHistory.push({ layers: currentLayers, activeLayerIndex: activeLayerIndexRef.current })
+    const trimmedHistory = trimHistoryToBudget(newHistory)
+    historyRef.current = trimmedHistory
+    const newIdx = trimmedHistory.length - 1
+    historyIndexRef.current = newIdx
+    lastSavedLayersRef.current = currentLayers
+    setHistory(trimmedHistory)
+    setHistoryIndex(newIdx)
+  }
+
+  // Function to save current layers to history (debounced).
   // The "did it change" check itself is deferred into the timeout (rather
-  // than run eagerly on every call) since JSON.stringify-ing the whole grid
-  // is wasted work if the user paints several more pixels before the
+  // than run eagerly on every call) since JSON.stringify-ing the whole layer
+  // stack is wasted work if the user paints several more pixels before the
   // debounce window elapses anyway - this keeps that cost to at most once
   // per 500ms of inactivity instead of once per pixel painted.
   const saveToHistory = useCallback(() => {
-    // Clear existing timer
     if (historyDebounceTimerRef.current) {
       clearTimeout(historyDebounceTimerRef.current)
     }
 
-    // Set new timer to save after 500ms
     historyDebounceTimerRef.current = setTimeout(() => {
       historyDebounceTimerRef.current = null
       if (isUndoRedoRef.current) return
 
-      const currentGrid = gridRef.current
-      const currentGridStr = JSON.stringify(currentGrid)
-      const lastSavedStr = JSON.stringify(lastSavedGridRef.current)
-      if (currentGridStr === lastSavedStr) {
+      const currentStr = JSON.stringify(layersRef.current)
+      const lastSavedStr = JSON.stringify(lastSavedLayersRef.current)
+      if (currentStr === lastSavedStr) {
         return // No change, don't save
       }
 
-      setHistory((hist) => {
-        const currentIdx = historyIndexRef.current
-        const newHistory = hist.slice(0, currentIdx + 1)
-        // Add new state to history
-        newHistory.push(currentGrid)
-        // Limit history to prevent memory issues (fewer entries retained for larger canvases)
-        const maxEntries = getMaxHistoryEntries(canvasDimsRef.current.width, canvasDimsRef.current.height)
-        if (newHistory.length > maxEntries) {
-          newHistory.shift()
-        }
-        const updatedHistory = newHistory
-        historyRef.current = updatedHistory
-        const newIdx = updatedHistory.length - 1
-        setHistoryIndex(newIdx)
-        historyIndexRef.current = newIdx
-        lastSavedGridRef.current = currentGrid
-        return updatedHistory
-      })
+      commitHistoryEntry()
     }, 500)
   }, [])
 
-  // Save current grid to history immediately (bypass debounce)
+  // Save current layers to history immediately (bypass debounce)
   const saveToHistoryImmediate = useCallback(() => {
-    const currentGrid = gridRef.current
-
-    // Clear any pending timer
     if (historyDebounceTimerRef.current) {
       clearTimeout(historyDebounceTimerRef.current)
       historyDebounceTimerRef.current = null
     }
 
-    // Check if grid has actually changed
-    const currentGridStr = JSON.stringify(currentGrid)
-    const lastSavedStr = JSON.stringify(lastSavedGridRef.current)
-
-    if (currentGridStr === lastSavedStr) {
+    const currentStr = JSON.stringify(layersRef.current)
+    const lastSavedStr = JSON.stringify(lastSavedLayersRef.current)
+    if (currentStr === lastSavedStr) {
       return // No change, don't save
     }
 
     if (!isUndoRedoRef.current) {
-      setHistory((hist) => {
-        const currentIdx = historyIndexRef.current
-        const newHistory = hist.slice(0, currentIdx + 1)
-        // Add new state to history
-        newHistory.push(currentGrid)
-        // Limit history to prevent memory issues (fewer entries retained for larger canvases)
-        const maxEntries = getMaxHistoryEntries(canvasDimsRef.current.width, canvasDimsRef.current.height)
-        if (newHistory.length > maxEntries) {
-          newHistory.shift()
-          const updatedHistory = newHistory
-          historyRef.current = updatedHistory
-          setHistoryIndex(updatedHistory.length - 1)
-          historyIndexRef.current = updatedHistory.length - 1
-          lastSavedGridRef.current = currentGrid
-          return updatedHistory
-        }
-        const updatedHistory = newHistory
-        historyRef.current = updatedHistory
-        const newIdx = updatedHistory.length - 1
-        setHistoryIndex(newIdx)
-        historyIndexRef.current = newIdx
-        lastSavedGridRef.current = currentGrid
-        return updatedHistory
-      })
+      commitHistoryEntry()
     }
   }, [])
 
@@ -193,37 +193,41 @@ function HomeContent() {
     }
   }, [])
 
+  // Applies a loaded/decoded DrawingData into state - shared by the
+  // localStorage, URL-share, and saved-drawing load effects below.
+  const applyLoadedDrawing = (data: DrawingData) => {
+    setPattern(data.pattern)
+    setPixelSize(data.pixelSize)
+    setCanvasWidth(data.canvasWidth)
+    setCanvasHeight(data.canvasHeight)
+    setTempCanvasWidth(data.canvasWidth.toString())
+    setTempCanvasHeight(data.canvasHeight.toString())
+    setSavedColors(Object.values(data.colors || {}))
+    setLayers(data.layers)
+    layersRef.current = data.layers
+    setActiveLayerIndex(data.activeLayerIndex)
+    activeLayerIndexRef.current = data.activeLayerIndex
+    setSelection(null)
+    setClipboard(null)
+    const initialHistory = [{ layers: data.layers, activeLayerIndex: data.activeLayerIndex }]
+    setHistory(initialHistory)
+    historyRef.current = initialHistory
+    setHistoryIndex(0)
+    historyIndexRef.current = 0
+    lastSavedLayersRef.current = data.layers
+  }
+
   // Load from local storage on mount
   useEffect(() => {
     const saved = localStorage.getItem('pattern-draw-data')
     if (saved) {
       try {
-        const data: DrawingData = JSON.parse(saved)
-        setPattern(data.pattern || 'squares')
-        setPixelSize(data.pixelSize || 15)
-        const width = data.canvasWidth || 20
-        const height = data.canvasHeight || 20
-        setCanvasWidth(width)
-        setCanvasHeight(height)
-        setTempCanvasWidth(width.toString())
-        setTempCanvasHeight(height.toString())
-        setSavedColors(Object.values(data.colors || {}))
-        const initialGrid = data.grid || {}
-        setGrid(initialGrid)
-        gridRef.current = initialGrid
-        setSelection(null)
-        setClipboard(null)
-        // Initialize history with loaded grid
-        const initialHistory = [initialGrid]
-        setHistory(initialHistory)
-        historyRef.current = initialHistory
-        setHistoryIndex(0)
-        historyIndexRef.current = 0
-        lastSavedGridRef.current = initialGrid
+        applyLoadedDrawing(normalizeDrawingData(JSON.parse(saved)))
       } catch (e) {
         console.error('Failed to load from localStorage', e)
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load from URL if present (for sharing)
@@ -236,27 +240,7 @@ function HomeContent() {
           try {
             const data = await decodeDrawing(encoded)
             if (data) {
-              setPattern(data.pattern || 'squares')
-              setPixelSize(data.pixelSize || 15)
-              const width = data.canvasWidth || 20
-              const height = data.canvasHeight || 20
-              setCanvasWidth(width)
-              setCanvasHeight(height)
-              setTempCanvasWidth(width.toString())
-              setTempCanvasHeight(height.toString())
-              setSavedColors(Object.values(data.colors || {}))
-              const initialGrid = data.grid || {}
-              setGrid(initialGrid)
-              gridRef.current = initialGrid
-              setSelection(null)
-              setClipboard(null)
-              // Initialize history with loaded grid
-              const initialHistory = [initialGrid]
-              setHistory(initialHistory)
-              historyRef.current = initialHistory
-              setHistoryIndex(0)
-              historyIndexRef.current = 0
-              lastSavedGridRef.current = initialGrid
+              applyLoadedDrawing(data)
             }
           } catch (e) {
             console.error('Failed to load from URL', e)
@@ -265,6 +249,7 @@ function HomeContent() {
         loadFromUrl()
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load from saved drawing ID if present.
@@ -278,6 +263,11 @@ function HomeContent() {
   // to the session actually becoming available or the id actually changing.
   useEffect(() => {
     const drawingId = searchParams.get('id')
+    if (drawingId && !isValidDrawingId(drawingId)) {
+      console.error('Ignoring malformed ?id= drawing parameter')
+      router.replace(window.location.pathname)
+      return
+    }
     if (drawingId && session?.user?.id && loadedDrawingIdRef.current !== drawingId) {
       loadedDrawingIdRef.current = drawingId
       const loadDrawing = async () => {
@@ -286,27 +276,9 @@ function HomeContent() {
           if (response.ok) {
             const { drawingData } = await response.json()
             if (drawingData) {
-              setPattern(drawingData.pattern || 'squares')
-              setPixelSize(drawingData.pixelSize || 15)
-              const width = drawingData.canvasWidth || 20
-              const height = drawingData.canvasHeight || 20
-              setCanvasWidth(width)
-              setCanvasHeight(height)
-              setTempCanvasWidth(width.toString())
-              setTempCanvasHeight(height.toString())
-              setSavedColors(Object.values(drawingData.colors || {}))
-              const initialGrid = drawingData.grid || {}
-              setGrid(initialGrid)
-              gridRef.current = initialGrid
-              setSelection(null)
-              setClipboard(null)
-              // Initialize history with loaded grid
-              const initialHistory = [initialGrid]
-              setHistory(initialHistory)
-              historyRef.current = initialHistory
-              setHistoryIndex(0)
-              historyIndexRef.current = 0
-              lastSavedGridRef.current = initialGrid
+              // Already normalized server-side: the GET route reads it via
+              // deserializeDrawing, which now always normalizes internally.
+              applyLoadedDrawing(drawingData)
               setCurrentDrawingId(drawingId)
             } else {
               loadedDrawingIdRef.current = null
@@ -321,27 +293,48 @@ function HomeContent() {
       }
       loadDrawing()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, session])
+
+  // Normalized before returning - the color text input (ColorPicker) takes
+  // arbitrary typed text with no validation, so `selectedColor` (and
+  // through it, painted cells) can hold a non-hex string. Every consumer of
+  // this snapshot (localStorage, share-link encoding, API saves) needs the
+  // same bounded/validated shape share and reload already get via
+  // normalizeDrawingData - without this, a share link or localStorage save
+  // could embed an invalid color that a later load then silently drops.
+  const buildDrawingData = useCallback((): DrawingData => normalizeDrawingData({
+    pattern,
+    pixelSize,
+    canvasWidth,
+    canvasHeight,
+    colors: savedColors.reduce((acc, color, idx) => {
+      acc[idx.toString()] = color
+      return acc
+    }, {} as { [key: string]: string }),
+    layers,
+    activeLayerIndex,
+  }), [pattern, pixelSize, canvasWidth, canvasHeight, savedColors, layers, activeLayerIndex])
 
   // Save function that can be called manually - memoized with useCallback
   const saveToLocalStorage = useCallback(() => {
-    const data: DrawingData = {
-      pattern,
-      pixelSize,
-      canvasWidth,
-      canvasHeight,
-      colors: savedColors.reduce((acc, color, idx) => {
-        acc[idx.toString()] = color
-        return acc
-      }, {} as { [key: string]: string }),
-      grid,
-    }
     try {
+      const data = buildDrawingData()
+      // Same aggregate cap as the API/share-link paths (see
+      // MAX_TOTAL_GRID_ENTRIES's comment) - without it, a drawing near the
+      // editor's own per-layer limits (50 layers, 500x500) would get
+      // JSON.stringified and written to localStorage on every debounced
+      // edit, which can block the main thread and repeatedly exceed the
+      // browser's per-origin storage quota. This autosave is a passive
+      // recovery mechanism, not a user-initiated save, so it skips
+      // silently rather than surfacing an error for something the user
+      // didn't explicitly ask for.
+      if (totalGridEntryCount(data) > MAX_TOTAL_GRID_ENTRIES) return
       localStorage.setItem('pattern-draw-data', JSON.stringify(data))
     } catch (e) {
       console.error('Failed to save to localStorage', e)
     }
-  }, [pattern, pixelSize, canvasWidth, canvasHeight, savedColors, grid])
+  }, [buildDrawingData])
 
   // Save to local storage whenever data changes (debounced - writing/serializing
   // the whole drawing on every single pixel painted during a fast drag is
@@ -380,12 +373,10 @@ function HomeContent() {
       saveToLocalStorage()
     }
 
-    // Add event listeners
     document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('pagehide', handlePageHide)
     window.addEventListener('beforeunload', handleBeforeUnload)
 
-    // Cleanup
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('pagehide', handlePageHide)
@@ -435,6 +426,27 @@ function HomeContent() {
     setSelection(rect)
   }, [])
 
+  // Applies `updater` to the active layer's grid. `onApplied`, if given, runs
+  // synchronously right after layersRef is updated - inside the same setState
+  // updater, since React doesn't invoke a functional setState updater
+  // synchronously at the call site. Calling e.g. saveToHistoryImmediate()
+  // right after updateActiveLayerGrid(...) returns (rather than passing it
+  // as onApplied) would race the update: layersRef.current would still hold
+  // the pre-update snapshot when the history save reads it.
+  const updateActiveLayerGrid = useCallback((
+    updater: (grid: { [key: string]: string }) => { [key: string]: string },
+    onApplied?: () => void
+  ) => {
+    const idx = activeLayerIndexRef.current
+    const targetLayer = layersRef.current[idx]
+    if (!targetLayer) return
+    const newGrid = updater(targetLayer.grid)
+    const newLayers = layersRef.current.map((l, i) => (i === idx ? { ...l, grid: newGrid } : l))
+    layersRef.current = newLayers
+    setLayers(newLayers)
+    onApplied?.()
+  }, [])
+
   const handleSelectionMoveEnd = useCallback((deltaRow: number, deltaCol: number) => {
     if (!selection) return
     const newRect: SelectionRect = {
@@ -443,41 +455,33 @@ function HomeContent() {
       endRow: selection.endRow + deltaRow,
       endCol: selection.endCol + deltaCol,
     }
-    // Derive the new grid from setGrid's own `prev` (not gridRef.current) so this
-    // stays correct if React invokes the updater more than once (e.g. Strict Mode).
-    setGrid((prev) => {
+    updateActiveLayerGrid((prev) => {
       const clip = copySelectionCells(prev, selection)
       let newGrid = clearRectFromGrid(prev, selection)
       newGrid = pasteClipboardToGrid(newGrid, clip, newRect.startRow, newRect.startCol, canvasWidth, canvasHeight)
-      gridRef.current = newGrid
-      saveToHistoryImmediate()
       return newGrid
-    })
+    }, saveToHistoryImmediate)
     setSelection(newRect)
-  }, [selection, canvasWidth, canvasHeight, saveToHistoryImmediate])
+  }, [selection, canvasWidth, canvasHeight, saveToHistoryImmediate, updateActiveLayerGrid])
 
   const handleCopy = useCallback(() => {
     if (!selection) return
-    setClipboard(copySelectionCells(gridRef.current, selection))
+    const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
+    setClipboard(copySelectionCells(activeGrid, selection))
   }, [selection])
 
   const handleCut = useCallback(() => {
     if (!selection) return
-    setClipboard(copySelectionCells(gridRef.current, selection))
-    const newGrid = clearRectFromGrid(gridRef.current, selection)
-    gridRef.current = newGrid
-    setGrid(newGrid)
-    saveToHistoryImmediate()
-  }, [selection, saveToHistoryImmediate])
+    const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
+    setClipboard(copySelectionCells(activeGrid, selection))
+    updateActiveLayerGrid((prev) => clearRectFromGrid(prev, selection), saveToHistoryImmediate)
+  }, [selection, saveToHistoryImmediate, updateActiveLayerGrid])
 
   const handlePaste = useCallback(() => {
     if (!clipboard) return
     const targetRow = selection ? selection.startRow : 0
     const targetCol = selection ? selection.startCol : 0
-    const newGrid = pasteClipboardToGrid(gridRef.current, clipboard, targetRow, targetCol, canvasWidth, canvasHeight)
-    gridRef.current = newGrid
-    setGrid(newGrid)
-    saveToHistoryImmediate()
+    updateActiveLayerGrid((prev) => pasteClipboardToGrid(prev, clipboard, targetRow, targetCol, canvasWidth, canvasHeight), saveToHistoryImmediate)
     setTool('select')
     setSelection({
       startRow: targetRow,
@@ -485,15 +489,12 @@ function HomeContent() {
       endRow: Math.min(targetRow + clipboard.height - 1, canvasHeight - 1),
       endCol: Math.min(targetCol + clipboard.width - 1, canvasWidth - 1),
     })
-  }, [clipboard, selection, canvasWidth, canvasHeight, saveToHistoryImmediate])
+  }, [clipboard, selection, canvasWidth, canvasHeight, saveToHistoryImmediate, updateActiveLayerGrid])
 
   const handleDeleteSelection = useCallback(() => {
     if (!selection) return
-    const newGrid = clearRectFromGrid(gridRef.current, selection)
-    gridRef.current = newGrid
-    setGrid(newGrid)
-    saveToHistoryImmediate()
-  }, [selection, saveToHistoryImmediate])
+    updateActiveLayerGrid((prev) => clearRectFromGrid(prev, selection), saveToHistoryImmediate)
+  }, [selection, saveToHistoryImmediate, updateActiveLayerGrid])
 
   const handleDeselect = useCallback(() => {
     setSelection(null)
@@ -556,8 +557,9 @@ function HomeContent() {
 
   const handlePixelFill = (key: string, color: string) => {
     if (tool === 'colorPicker') {
-      // Pick color from pixel, then return to whichever tool was active before
-      const pixelColor = grid[key] || '#ffffff'
+      // Pick the color as it's visually shown (composited across all visible
+      // layers), then return to whichever tool was active before.
+      const pixelColor = compositeGrid[key] || '#ffffff'
       setSelectedColor(pixelColor)
       handleColorSave(pixelColor)
       setTool(previousToolRef.current)
@@ -565,54 +567,44 @@ function HomeContent() {
       const [rowStr, colStr] = key.split(',')
       const row = parseInt(rowStr, 10)
       const col = parseInt(colStr, 10)
-      const targetColor = grid[key] || '#ffffff'
+      const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
+      const targetColor = activeGrid[key] || TRANSPARENT
       if (targetColor === color) return
 
-      setGrid((prev) => {
-        const newGrid = floodFillGrid(prev, row, col, targetColor, color, canvasWidth, canvasHeight)
-        gridRef.current = newGrid
-
-        if (!isUndoRedoRef.current) {
-          saveToHistory()
-        }
-
-        return newGrid
-      })
+      updateActiveLayerGrid(
+        (prev) => floodFillGrid(prev, row, col, targetColor, color, canvasWidth, canvasHeight),
+        () => { if (!isUndoRedoRef.current) saveToHistory() }
+      )
     } else {
-      // Fill pixel with color
-      setGrid((prev) => {
-        const newGrid = { ...prev, [key]: color }
-        gridRef.current = newGrid
-
-        // Schedule history save (debounced) if not in the middle of undo/redo
-        if (!isUndoRedoRef.current) {
-          saveToHistory()
-        }
-
-        return newGrid
-      })
+      updateActiveLayerGrid(
+        (prev) => ({ ...prev, [key]: color }),
+        () => { if (!isUndoRedoRef.current) saveToHistory() }
+      )
     }
   }
 
   const handleUndo = () => {
-    // Save current state immediately if there are pending changes
     saveToHistoryImmediate()
 
-    // Use setTimeout to ensure state updates are processed
     setTimeout(() => {
       const currentIdx = historyIndexRef.current
       const currentHistory = historyRef.current
       if (currentIdx > 0) {
         isUndoRedoRef.current = true
         const newIndex = currentIdx - 1
-        const newGrid = currentHistory[newIndex]
+        const entry = currentHistory[newIndex]
         setHistoryIndex(newIndex)
         historyIndexRef.current = newIndex
-        setGrid(newGrid)
-        gridRef.current = newGrid
-        lastSavedGridRef.current = newGrid
+        setLayers(entry.layers)
+        layersRef.current = entry.layers
+        lastSavedLayersRef.current = entry.layers
+        // Restore whichever layer was active at this point in history, not
+        // wherever the (now possibly-reordered/deleted) currently-active
+        // index happens to land - see HistoryEntry.
+        const restoredActive = clampActiveLayerIndex(entry.activeLayerIndex, entry.layers.length)
+        setActiveLayerIndex(restoredActive)
+        activeLayerIndexRef.current = restoredActive
         setSelection(null)
-        // Reset flag after state update
         setTimeout(() => {
           isUndoRedoRef.current = false
         }, 0)
@@ -621,24 +613,24 @@ function HomeContent() {
   }
 
   const handleRedo = () => {
-    // Save current state immediately if there are pending changes
     saveToHistoryImmediate()
 
-    // Use setTimeout to ensure state updates are processed
     setTimeout(() => {
       const currentIdx = historyIndexRef.current
       const currentHistory = historyRef.current
       if (currentIdx < currentHistory.length - 1) {
         isUndoRedoRef.current = true
         const newIndex = currentIdx + 1
-        const newGrid = currentHistory[newIndex]
+        const entry = currentHistory[newIndex]
         setHistoryIndex(newIndex)
         historyIndexRef.current = newIndex
-        setGrid(newGrid)
-        gridRef.current = newGrid
-        lastSavedGridRef.current = newGrid
+        setLayers(entry.layers)
+        layersRef.current = entry.layers
+        lastSavedLayersRef.current = entry.layers
+        const restoredActive = clampActiveLayerIndex(entry.activeLayerIndex, entry.layers.length)
+        setActiveLayerIndex(restoredActive)
+        activeLayerIndexRef.current = restoredActive
         setSelection(null)
-        // Reset flag after state update
         setTimeout(() => {
           isUndoRedoRef.current = false
         }, 0)
@@ -647,15 +639,16 @@ function HomeContent() {
   }
 
   const handleClear = () => {
-    // Clear any pending history save
     if (historyDebounceTimerRef.current) {
       clearTimeout(historyDebounceTimerRef.current)
       historyDebounceTimerRef.current = null
     }
 
-    const emptyGrid = {}
-    setGrid(emptyGrid)
-    gridRef.current = emptyGrid
+    const emptyLayers = createDefaultLayers()
+    setLayers(emptyLayers)
+    layersRef.current = emptyLayers
+    setActiveLayerIndex(0)
+    activeLayerIndexRef.current = 0
     setSelection(null)
     setClipboard(null)
     // Reset currentDrawingId so future saves create a new drawing instead of updating
@@ -664,30 +657,10 @@ function HomeContent() {
     if (searchParams.get('id')) {
       router.replace(window.location.pathname)
     }
-    // Add clear to history immediately (not debounced)
-    const maxHistoryEntries = getMaxHistoryEntries(canvasWidth, canvasHeight)
-    setHistory((hist) => {
-      const currentIdx = historyIndexRef.current
-      const newHistory = hist.slice(0, currentIdx + 1)
-      newHistory.push(emptyGrid)
-      if (newHistory.length > maxHistoryEntries) {
-        newHistory.shift()
-        const updatedHistory = newHistory
-        historyRef.current = updatedHistory
-        const newIdx = updatedHistory.length - 1
-        setHistoryIndex(newIdx)
-        historyIndexRef.current = newIdx
-        lastSavedGridRef.current = emptyGrid
-        return updatedHistory
-      }
-      const updatedHistory = newHistory
-      historyRef.current = updatedHistory
-      const newIdx = updatedHistory.length - 1
-      setHistoryIndex(newIdx)
-      historyIndexRef.current = newIdx
-      lastSavedGridRef.current = emptyGrid
-      return updatedHistory
-    })
+    // Add clear to history immediately (not debounced). layersRef/
+    // activeLayerIndexRef are already updated above, so this pushes exactly
+    // the empty state as the new entry.
+    commitHistoryEntry()
   }
 
   const handleNewDrawingCopy = () => {
@@ -732,41 +705,27 @@ function HomeContent() {
       const colOffset = Math.floor((newWidth - canvasWidth) / 2)
       const rowOffset = Math.floor((newHeight - canvasHeight) / 2)
 
-      const shiftedGrid: { [key: string]: string } = {}
-      for (const key in grid) {
-        const [rowStr, colStr] = key.split(',')
-        const newRow = parseInt(rowStr, 10) + rowOffset
-        const newCol = parseInt(colStr, 10) + colOffset
-        if (newRow >= 0 && newRow < newHeight && newCol >= 0 && newCol < newWidth) {
-          shiftedGrid[`${newRow},${newCol}`] = grid[key]
+      const shiftedLayers = layersRef.current.map((layer) => {
+        const shiftedGrid: { [key: string]: string } = {}
+        for (const key in layer.grid) {
+          const [rowStr, colStr] = key.split(',')
+          const newRow = parseInt(rowStr, 10) + rowOffset
+          const newCol = parseInt(colStr, 10) + colOffset
+          if (newRow >= 0 && newRow < newHeight && newCol >= 0 && newCol < newWidth) {
+            shiftedGrid[`${newRow},${newCol}`] = layer.grid[key]
+          }
         }
-      }
+        return { ...layer, grid: shiftedGrid }
+      })
 
-      setGrid(shiftedGrid)
-      gridRef.current = shiftedGrid
+      setLayers(shiftedLayers)
+      layersRef.current = shiftedLayers
       setSelection(null)
       saveToHistoryImmediate()
     }
   }
 
-  const buildDrawingData = (): DrawingData => ({
-    pattern,
-    pixelSize,
-    canvasWidth,
-    canvasHeight,
-    colors: savedColors.reduce((acc, color, idx) => {
-      acc[idx.toString()] = color
-      return acc
-    }, {} as { [key: string]: string }),
-    grid,
-  })
-
-  const handleShare = async () => {
-    const data = buildDrawingData()
-
-    const encoded = await encodeDrawing(data)
-    const url = `${window.location.origin}${window.location.pathname}?drawing=${encoded}`
-
+  const copyOrPromptUrl = (url: string) => {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(() => {
         showToast('Link copied to clipboard!', 'success')
@@ -776,54 +735,82 @@ function HomeContent() {
     }
   }
 
+  const handleShare = async () => {
+    // Always the embedded-data link, never a ?id= one: GET /api/drawings/[id]
+    // requires the requester to be signed in *and* be the drawing's owner
+    // (401/403 otherwise), so an id-based link can only ever be opened by
+    // the person who shared it - useless for sharing with anyone else,
+    // which is the entire point of this button. This also always encodes
+    // the current in-memory state fresh, so there's no risk of handing out
+    // a stale previously-saved version.
+    const data = buildDrawingData()
+
+    // Cheap preflight before the expensive encode below (JSON-shape work
+    // plus gzip compression) - without it, a drawing near the editor's own
+    // limits (50 layers, 500x500) can freeze this tab for a noticeable
+    // stretch only to be rejected afterward anyway by the URL-length check,
+    // since output that large essentially never compresses under
+    // SAFE_SHARE_URL_LENGTH once base64-encoded.
+    if (totalGridEntryCount(data) > MAX_TOTAL_GRID_ENTRIES) {
+      showToast('This drawing is too large to share as a link.', 'error')
+      return
+    }
+
+    const encoded = await encodeDrawing(data)
+    const url = `${window.location.origin}${window.location.pathname}?drawing=${encoded}`
+
+    if (url.length > SAFE_SHARE_URL_LENGTH) {
+      showToast('This drawing is too large to share as a link.', 'error')
+      return
+    }
+
+    copyOrPromptUrl(url)
+  }
+
   const handleDownload = () => {
     const canvas = document.createElement('canvas')
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // Use the fixed canvas dimensions
     const cols = canvasWidth
     const rows = canvasHeight
 
-    // For brick patterns, add extra dimension for offset
     const widthOffset = pattern === 'bricks' ? pixelSize / 2 : 0
     const heightOffset = pattern === 'bricksVertical' ? pixelSize / 2 : 0
     canvas.width = cols * pixelSize + widthOffset
     canvas.height = rows * pixelSize + heightOffset
 
-    // Fill background
+    // Fill background (the "paper" the layers sit on)
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-    // Draw grid with borders
     ctx.strokeStyle = '#ddd'
     ctx.lineWidth = 1
+
+    // Flatten all visible layers into a single composite before rendering -
+    // this is the "merge to a single layer" export behavior.
+    const flatGrid = compositeLayers(layers)
 
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
         const key = `${row},${col}`
-        const color = grid[key] || '#ffffff'
+        const color = flatGrid[key] || '#ffffff'
 
         let x = col * pixelSize
         let y = row * pixelSize
 
-        // Adjust position for brick patterns
         if (pattern === 'bricks' && row % 2 === 1) {
           x += pixelSize / 2
         } else if (pattern === 'bricksVertical' && col % 2 === 1) {
           y += pixelSize / 2
         }
 
-        // Fill pixel
         ctx.fillStyle = color
         ctx.fillRect(x, y, pixelSize, pixelSize)
-
-        // Draw border
         ctx.strokeRect(x, y, pixelSize, pixelSize)
       }
     }
 
-    // Download
     canvas.toBlob((blob) => {
       if (blob) {
         const url = URL.createObjectURL(blob)
@@ -887,7 +874,8 @@ function HomeContent() {
           showToast('Drawing saved!', 'success')
         }
       } else {
-        throw new Error('Failed to save drawing')
+        const { error } = await response.json().catch(() => ({ error: undefined }))
+        throw new Error(error || 'Failed to save drawing')
       }
     } catch (error) {
       console.error('Error saving drawing:', error)
@@ -935,7 +923,8 @@ function HomeContent() {
         router.replace(`${window.location.pathname}?id=${drawing.id}`)
         showToast('Copy saved', 'success')
       } else {
-        throw new Error('Failed to save drawing copy')
+        const { error: message } = await response.json().catch(() => ({ error: undefined }))
+        throw new Error(message || 'Failed to save drawing copy')
       }
     } catch (error) {
       console.error('Error saving drawing copy:', error)
@@ -946,6 +935,143 @@ function HomeContent() {
     }
   }
 
+  // --- Layer management ---
+
+  // All of the handlers below compute the next layers array synchronously
+  // from layersRef.current and call setLayers(newLayers) with a plain value,
+  // rather than setLayers((prev) => {...}) with side effects inside. A
+  // functional updater gets double-invoked by React Strict Mode in dev, and
+  // since these updates carry side effects (ref writes, nested setState
+  // calls like saveToHistoryImmediate), double-invoking them would corrupt
+  // history with duplicate/divergent entries. Reading layersRef.current
+  // directly is safe here since it's always kept in sync synchronously.
+
+  const handleAddLayer = useCallback(() => {
+    // Mirrors the MAX_LAYERS cap normalizeDrawingData enforces for
+    // loaded/shared data - without this, ordinary repeated clicking could
+    // grow every composite, history snapshot, and localStorage payload
+    // past the same limit that guard exists to enforce.
+    if (layersRef.current.length >= MAX_LAYERS) {
+      showToast(`A drawing can have at most ${MAX_LAYERS} layers.`, 'error')
+      return
+    }
+    const newIndex = layersRef.current.length
+    const newLayer = createLayer(`Layer ${newIndex + 1}`)
+    const newLayers = [...layersRef.current, newLayer]
+    layersRef.current = newLayers
+    setLayers(newLayers)
+    setActiveLayerIndex(newIndex)
+    activeLayerIndexRef.current = newIndex
+    setSelection(null)
+    saveToHistoryImmediate()
+  }, [saveToHistoryImmediate, showToast])
+
+  const handleDeleteLayer = useCallback((id: string) => {
+    const prev = layersRef.current
+    if (prev.length <= 1) return
+    const deleteIndex = prev.findIndex((l) => l.id === id)
+    if (deleteIndex === -1) return
+    const newLayers = prev.filter((l) => l.id !== id)
+    layersRef.current = newLayers
+    setLayers(newLayers)
+
+    const currentActive = activeLayerIndexRef.current
+    let newActive = currentActive
+    if (deleteIndex === currentActive) {
+      newActive = Math.max(0, deleteIndex - 1)
+    } else if (deleteIndex < currentActive) {
+      newActive = currentActive - 1
+    }
+    newActive = clampActiveLayerIndex(newActive, newLayers.length)
+    setActiveLayerIndex(newActive)
+    activeLayerIndexRef.current = newActive
+
+    setSelection(null)
+    saveToHistoryImmediate()
+  }, [saveToHistoryImmediate])
+
+  const handleRenameLayer = useCallback((id: string, name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const newLayers = layersRef.current.map((l) => (l.id === id ? { ...l, name: trimmed } : l))
+    layersRef.current = newLayers
+    setLayers(newLayers)
+    saveToHistoryImmediate()
+  }, [saveToHistoryImmediate])
+
+  const handleToggleLayerVisibility = useCallback((id: string) => {
+    const newLayers = layersRef.current.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l))
+    layersRef.current = newLayers
+    setLayers(newLayers)
+    saveToHistoryImmediate()
+  }, [saveToHistoryImmediate])
+
+  const handleSetActiveLayer = useCallback((id: string) => {
+    const index = layersRef.current.findIndex((l) => l.id === id)
+    if (index === -1) return
+    setActiveLayerIndex(index)
+    activeLayerIndexRef.current = index
+    setSelection(null)
+  }, [])
+
+  // direction: 'up' moves the layer toward the top of the stack (higher
+  // array index); 'down' moves it toward the bottom.
+  const handleMoveLayer = useCallback((id: string, direction: 'up' | 'down') => {
+    const prev = layersRef.current
+    const index = prev.findIndex((l) => l.id === id)
+    if (index === -1) return
+    const targetIndex = direction === 'up' ? index + 1 : index - 1
+    if (targetIndex < 0 || targetIndex >= prev.length) return
+
+    const newLayers = [...prev]
+    ;[newLayers[index], newLayers[targetIndex]] = [newLayers[targetIndex], newLayers[index]]
+    layersRef.current = newLayers
+    setLayers(newLayers)
+
+    if (activeLayerIndexRef.current === index) {
+      setActiveLayerIndex(targetIndex)
+      activeLayerIndexRef.current = targetIndex
+    } else if (activeLayerIndexRef.current === targetIndex) {
+      setActiveLayerIndex(index)
+      activeLayerIndexRef.current = index
+    }
+
+    saveToHistoryImmediate()
+  }, [saveToHistoryImmediate])
+
+  const handleMergeLayerDown = useCallback((id: string) => {
+    const prev = layersRef.current
+    const index = prev.findIndex((l) => l.id === id)
+    if (index <= 0 || !prev[index].visible) return
+
+    const newLayers = mergeLayerDown(prev, id)
+    layersRef.current = newLayers
+    setLayers(newLayers)
+
+    const prevActive = activeLayerIndexRef.current
+    const newActive = clampActiveLayerIndex(
+      prevActive === index ? index - 1 : prevActive > index ? prevActive - 1 : prevActive,
+      newLayers.length
+    )
+    setActiveLayerIndex(newActive)
+    activeLayerIndexRef.current = newActive
+
+    setSelection(null)
+    saveToHistoryImmediate()
+  }, [saveToHistoryImmediate])
+
+  const layersPanelProps = {
+    layers,
+    activeLayerId: activeLayer?.id || '',
+    canAddLayer: layers.length < MAX_LAYERS,
+    onSelectLayer: handleSetActiveLayer,
+    onAddLayer: handleAddLayer,
+    onDeleteLayer: handleDeleteLayer,
+    onRenameLayer: handleRenameLayer,
+    onToggleVisibility: handleToggleLayerVisibility,
+    onMoveLayer: handleMoveLayer,
+    onMergeDown: handleMergeLayerDown,
+  }
 
   return (
     <main className={styles.main}>
@@ -1004,6 +1130,7 @@ function HomeContent() {
             </div>
             <div className={styles.headerRight}>
               <UserMenu />
+              <LayersDrawer {...layersPanelProps} />
               <MobileMenu
                 pattern={pattern}
                 pixelSize={pixelSize}
@@ -1066,7 +1193,10 @@ function HomeContent() {
                 canvasWidth={canvasWidth}
                 canvasHeight={canvasHeight}
                 selectedColor={selectedColor}
-                grid={grid}
+                grid={compositeGrid}
+                activeLayerGrid={activeLayer?.grid || {}}
+                layers={layers}
+                activeLayerIndex={activeLayerIndex}
                 onPixelFill={handlePixelFill}
                 tool={tool}
                 selection={selection}
@@ -1100,6 +1230,9 @@ function HomeContent() {
                 isSavingCopy={isSavingCopy}
                 onPrint={() => { }}
               />
+            </div>
+            <div className={styles.panelSection}>
+              <LayersPanel {...layersPanelProps} />
             </div>
             <div className={styles.panelSection}>
               <ColorPicker
@@ -1168,4 +1301,3 @@ export default function Home() {
     </Suspense>
   )
 }
-

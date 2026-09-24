@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, memo } from 'react'
-import type { MatrixPattern, Tool, SelectionRect } from '@/lib/types'
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
+import type { MatrixPattern, Tool, SelectionRect, Layer } from '@/lib/types'
 import { normalizeRect } from '@/lib/selection'
+import { compositeLayers } from '@/lib/layers'
 import styles from './DrawingCanvas.module.css'
 
 interface PixelProps {
@@ -40,7 +41,21 @@ interface DrawingCanvasProps {
   canvasWidth: number
   canvasHeight: number
   selectedColor: string
+  // Composited view of all visible layers - what's actually rendered.
   grid: { [key: string]: string }
+  // Just the active layer's cells - used for the moving-selection preview so
+  // it shows only what's actually being relocated, not layers beneath it.
+  activeLayerGrid: { [key: string]: string }
+  // The full layer stack and the active layer's index - used only to
+  // compute the "hole"/floating-preview composites (see the paint effect
+  // below), and only while an actual move-drag is happening. Passed raw
+  // (rather than pre-composited by the caller) so that composite work
+  // only ever runs inside that gated effect: `selection` alone goes
+  // non-null as soon as the user starts drawing the initial marquee, well
+  // before any move begins, so composites eagerly derived from `selection`
+  // changing would still redo this work on every marquee-drag mousemove.
+  layers: Layer[]
+  activeLayerIndex: number
   onPixelFill: (key: string, color: string) => void
   tool: Tool
   selection: SelectionRect | null
@@ -55,6 +70,9 @@ export default function DrawingCanvas({
   canvasHeight,
   selectedColor,
   grid,
+  activeLayerGrid,
+  layers,
+  activeLayerIndex,
   onPixelFill,
   tool,
   selection,
@@ -75,6 +93,12 @@ export default function DrawingCanvas({
   const moveStartRef = useRef<{ row: number; col: number } | null>(null)
   const [moveDelta, setMoveDelta] = useState({ dRow: 0, dCol: 0 })
   const movingSnapshotRef = useRef<string[][] | null>(null)
+  // The hole (what's left behind) and the floating preview (what's being
+  // dragged) are drawn onto <canvas> elements rather than one <div> per
+  // cell - at the max 500x500 canvas size, selecting the whole thing would
+  // otherwise create 250,000 DOM nodes per overlay on every drag frame.
+  const holeCanvasRef = useRef<HTMLCanvasElement>(null)
+  const floatingCanvasRef = useRef<HTMLCanvasElement>(null)
   const [zoom, setZoom] = useState(1.0)
   const containerRef = useRef<HTMLDivElement>(null)
   const zoomContainerRef = useRef<HTMLDivElement>(null)
@@ -95,6 +119,15 @@ export default function DrawingCanvas({
   const getPixelColor = (row: number, col: number): string => {
     const key = getPixelKey(row, col)
     return grid[key] || '#ffffff'
+  }
+
+  const getActiveLayerPixelColor = (row: number, col: number): string => {
+    const key = getPixelKey(row, col)
+    // Unlike the base canvas (which sits on an opaque white "paper"), the
+    // moving-selection preview floats above the already-rendered composite,
+    // so an empty active-layer cell must stay see-through here - falling
+    // back to white would paint over whatever's on a layer beneath it.
+    return activeLayerGrid[key] || 'transparent'
   }
 
   const isInsideSelection = (row: number, col: number): boolean => {
@@ -159,7 +192,7 @@ export default function DrawingCanvas({
         for (let r = selection.startRow; r <= selection.endRow; r++) {
           const rowColors: string[] = []
           for (let c = selection.startCol; c <= selection.endCol; c++) {
-            rowColors.push(getPixelColor(r, c))
+            rowColors.push(getActiveLayerPixelColor(r, c))
           }
           snapshot.push(rowColors)
         }
@@ -293,7 +326,7 @@ export default function DrawingCanvas({
           for (let r = selection.startRow; r <= selection.endRow; r++) {
             const rowColors: string[] = []
             for (let c = selection.startCol; c <= selection.endCol; c++) {
-              rowColors.push(getPixelColor(r, c))
+              rowColors.push(getActiveLayerPixelColor(r, c))
             }
             snapshot.push(rowColors)
           }
@@ -368,7 +401,7 @@ export default function DrawingCanvas({
         }
       }
     }
-  }, [isSingleClickMode, isSelectMode, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange, grid])
+  }, [isSingleClickMode, isSelectMode, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange, activeLayerGrid])
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     // Handle pinch gesture
@@ -565,6 +598,111 @@ export default function DrawingCanvas({
     }
   }, [handleTouchStart, handleTouchMove, handleTouchEnd])
 
+  // The moving-selection composites, cached for the duration of a drag
+  // instead of recomputed on every pointer move: computing them is
+  // deliberately NOT keyed on moveDelta, only on isMovingSelection turning
+  // on (or layers/activeLayerIndex changing while it's on) - moveDelta
+  // changes on every mousemove/touchmove while dragging, and redoing a full
+  // compositeLayers walk of every non-active/above layer on each of those
+  // (rather than just the cheap destination-cell lookup the paint effect
+  // below needs) could block the UI on a large multi-layer drag.
+  const dragComposites = useMemo(() => {
+    if (!isMovingSelection) return null
+    return {
+      below: compositeLayers(layers.filter((_, i) => i !== activeLayerIndex)),
+      above: compositeLayers(layers.slice(activeLayerIndex + 1)),
+    }
+  }, [isMovingSelection, layers, activeLayerIndex])
+
+  // Paints the hole (layers below the active one, at the selection's
+  // original position) and the floating preview (the active layer's
+  // dragged content) onto their canvases. The hole only needs repainting
+  // when the drag starts or the underlying colors change - its position
+  // never moves. The floating preview's transparent cells do need
+  // repainting on every moveDelta change: they're rendered against the
+  // non-active-layer composite *at the destination*, which shifts as the
+  // selection is dragged (see the comment below the transparent-color
+  // check), so this effect also depends on moveDelta despite the extra
+  // repaint cost while dragging - but only for the (cheap) per-cell lookup
+  // against dragComposites, not for recomputing it.
+  useEffect(() => {
+    if (!isSelectMode || !selection || !isMovingSelection || !dragComposites) return
+    const width = selection.endCol - selection.startCol + 1
+    const height = selection.endRow - selection.startRow + 1
+
+    // For the moving-selection "hole": sits on the same opaque white
+    // "paper" as the base canvas, so an empty cell here (nothing on any
+    // other layer) correctly falls back to white rather than 'transparent'.
+    const getBelowActiveLayerPixelColor = (row: number, col: number): string =>
+      dragComposites.below[getPixelKey(row, col)] || '#ffffff'
+    // No fallback: `undefined` here means "nothing above the active layer
+    // at this cell", distinct from a painted-but-white cell, so the caller
+    // can tell whether to let it take over from the dragged color.
+    const getAboveActiveLayerPixelColor = (row: number, col: number): string | undefined =>
+      dragComposites.above[getPixelKey(row, col)]
+    // compositeLayers skips hidden layers everywhere else (the base canvas,
+    // export, dragComposites itself) - the floating preview needs the same
+    // rule, since the UI allows selecting and dragging a hidden layer's
+    // content. Without this, every captured active-layer cell still paints
+    // onto the floating canvas regardless of visibility, briefly exposing
+    // pixels that are supposed to be invisible everywhere else.
+    const isActiveLayerHidden = layers[activeLayerIndex]?.visible === false
+
+    // The backing store is one pixel per cell (not pixelSize per cell) and
+    // scaled up to the on-screen size via CSS instead - at the maximum
+    // canvas size and pixelSize (500 cells x 50px), a pixelSize-scaled
+    // backing store would be 25,000x25,000px, around 2.5GB per canvas,
+    // which can hang or crash the tab on a large selection.
+    const holeCtx = holeCanvasRef.current?.getContext('2d')
+    if (holeCtx) {
+      holeCtx.imageSmoothingEnabled = false
+      holeCtx.clearRect(0, 0, width, height)
+      for (let r = 0; r < height; r++) {
+        for (let c = 0; c < width; c++) {
+          holeCtx.fillStyle = getBelowActiveLayerPixelColor(selection.startRow + r, selection.startCol + c)
+          holeCtx.fillRect(c, r, 1, 1)
+        }
+      }
+    }
+
+    const floatingCtx = floatingCanvasRef.current?.getContext('2d')
+    if (floatingCtx && movingSnapshotRef.current) {
+      floatingCtx.imageSmoothingEnabled = false
+      floatingCtx.clearRect(0, 0, width, height)
+      movingSnapshotRef.current.forEach((rowColors, r) => {
+        rowColors.forEach((color, c) => {
+          // A transparent source cell deletes whatever's on the active
+          // layer at the destination when the move is dropped (see
+          // pasteClipboardToGrid's TRANSPARENT handling) - leaving it
+          // fully see-through here would instead let the destination's
+          // *current* (pre-drop) active-layer content show through during
+          // the drag, which can visually differ from what the drop will
+          // actually produce. Rendering it against the non-active-layer
+          // composite at the destination previews the real post-drop
+          // result instead.
+          const destRow = selection.startRow + r + moveDelta.dRow
+          const destCol = selection.startCol + c + moveDelta.dCol
+          // A hidden active layer contributes nothing to the visible
+          // composite regardless of what it actually has painted there -
+          // same treatment as a transparent cell, whether or not this one
+          // has real content.
+          if (isActiveLayerHidden || color === 'transparent') {
+            floatingCtx.fillStyle = getBelowActiveLayerPixelColor(destRow, destCol)
+          } else {
+            // A layer above the active one keeps covering this cell after
+            // the drop regardless of what the active layer's own content
+            // becomes there - compositeLayers always lets it win. Without
+            // this check, the dragged color would render on top of
+            // everything during the preview even where it's about to be
+            // hidden again once dropped.
+            floatingCtx.fillStyle = getAboveActiveLayerPixelColor(destRow, destCol) || color
+          }
+          floatingCtx.fillRect(c, r, 1, 1)
+        })
+      })
+    }
+  }, [isSelectMode, selection, isMovingSelection, dragComposites, pixelSize, moveDelta])
+
   const renderSquare = (row: number, col: number) => {
     return (
       <Pixel
@@ -696,8 +834,17 @@ export default function DrawingCanvas({
 
           {isSelectMode && selection && isMovingSelection && movingSnapshotRef.current && (
             <>
-              <div
+              {/* Renders the other (non-active) layers for this rect onto a
+                  canvas - not one <div> per cell - so the hole left by the
+                  active layer's content actually shows what's really
+                  underneath (rather than standing in a fake "empty" color)
+                  without creating up to 250,000 DOM nodes on a full-canvas
+                  selection. The drawing effect above paints its pixels. */}
+              <canvas
+                ref={holeCanvasRef}
                 className={styles.selectionHole}
+                width={selection.endCol - selection.startCol + 1}
+                height={selection.endRow - selection.startRow + 1}
                 style={{
                   left: `${selection.startCol * pixelSize}px`,
                   top: `${selection.startRow * pixelSize}px`,
@@ -705,28 +852,18 @@ export default function DrawingCanvas({
                   height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
                 }}
               />
-              <div
+              <canvas
+                ref={floatingCanvasRef}
                 className={styles.selectionFloating}
+                width={selection.endCol - selection.startCol + 1}
+                height={selection.endRow - selection.startRow + 1}
                 style={{
                   left: `${(selection.startCol + moveDelta.dCol) * pixelSize}px`,
                   top: `${(selection.startRow + moveDelta.dRow) * pixelSize}px`,
                   width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
                   height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
-                  display: 'grid',
-                  gridTemplateColumns: `repeat(${selection.endCol - selection.startCol + 1}, ${pixelSize}px)`,
-                  gridTemplateRows: `repeat(${selection.endRow - selection.startRow + 1}, ${pixelSize}px)`,
                 }}
-              >
-                {movingSnapshotRef.current.map((rowColors, r) =>
-                  rowColors.map((color, c) => (
-                    <div
-                      key={`${r},${c}`}
-                      className={styles.selectionFloatingCell}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))
-                )}
-              </div>
+              />
             </>
           )}
         </div>
