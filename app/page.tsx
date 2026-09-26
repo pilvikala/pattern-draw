@@ -414,6 +414,10 @@ function HomeContent() {
     setTool('draw')
   }
 
+  const handleEraseModeToggle = (enabled: boolean) => {
+    setTool(enabled ? 'erase' : 'draw')
+  }
+
   const handleFillModeToggle = (enabled: boolean) => {
     setTool(enabled ? 'fill' : 'draw')
   }
@@ -500,7 +504,7 @@ function HomeContent() {
     setSelection(null)
   }, [])
 
-  // Keyboard shortcuts: tool switching (P/F/C/S) and select-tool actions
+  // Keyboard shortcuts: tool switching (P/E/F/C/S) and select-tool actions
   // (copy/cut/paste/delete/deselect). Ignored while typing in a text input
   // so hex-color and canvas-size fields keep working.
   useEffect(() => {
@@ -539,6 +543,9 @@ function HomeContent() {
       } else if (noModifiers && key === 'p') {
         e.preventDefault()
         handleDrawModeSelect()
+      } else if (noModifiers && key === 'e') {
+        e.preventDefault()
+        handleEraseModeToggle(tool !== 'erase')
       } else if (noModifiers && key === 'f') {
         e.preventDefault()
         handleFillModeToggle(tool !== 'fill')
@@ -553,7 +560,7 @@ function HomeContent() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [tool, selection, clipboard, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
+  }, [tool, selection, clipboard, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleEraseModeToggle, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
 
   const handlePixelFill = (key: string, color: string) => {
     if (tool === 'colorPicker') {
@@ -573,6 +580,19 @@ function HomeContent() {
 
       updateActiveLayerGrid(
         (prev) => floodFillGrid(prev, row, col, targetColor, color, canvasWidth, canvasHeight),
+        () => { if (!isUndoRedoRef.current) saveToHistory() }
+      )
+    } else if (tool === 'erase') {
+      // Erasing removes the cell from the active layer's grid entirely (an
+      // absent key is transparent), so layers beneath show through.
+      const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
+      if (!(key in activeGrid)) return
+
+      updateActiveLayerGrid(
+        (prev) => {
+          const { [key]: _erased, ...rest } = prev
+          return rest
+        },
         () => { if (!isUndoRedoRef.current) saveToHistory() }
       )
     } else {
@@ -1161,6 +1181,8 @@ function HomeContent() {
                 onColorSave={handleColorSave}
                 isDrawMode={tool === 'draw'}
                 onDrawModeSelect={handleDrawModeSelect}
+                isEraseMode={tool === 'erase'}
+                onEraseModeToggle={handleEraseModeToggle}
                 isColorPickerMode={tool === 'colorPicker'}
                 onColorPickerModeToggle={handleColorPickerModeToggle}
                 isFillMode={tool === 'fill'}
@@ -1241,6 +1263,8 @@ function HomeContent() {
                 onColorSave={handleColorSave}
                 isDrawMode={tool === 'draw'}
                 onDrawModeSelect={handleDrawModeSelect}
+                isEraseMode={tool === 'erase'}
+                onEraseModeToggle={handleEraseModeToggle}
                 isColorPickerMode={tool === 'colorPicker'}
                 onColorPickerModeToggle={handleColorPickerModeToggle}
                 isFillMode={tool === 'fill'}

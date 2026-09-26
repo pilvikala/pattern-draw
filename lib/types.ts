@@ -1,6 +1,6 @@
 export type MatrixPattern = 'squares' | 'bricks' | 'bricksVertical'
 
-export type Tool = 'draw' | 'fill' | 'colorPicker' | 'select'
+export type Tool = 'draw' | 'erase' | 'fill' | 'colorPicker' | 'select'
 
 // Sentinel used (instead of '#ffffff') to mean "no color painted here" in a
 // layer's grid, clipboard cells, or flood-fill comparisons. A cell simply
