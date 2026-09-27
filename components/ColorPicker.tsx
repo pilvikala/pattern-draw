@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef } from 'react'
-import { PencilIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon } from './icons'
+import { PencilIcon, EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon } from './icons'
 import styles from './ColorPicker.module.css'
 
 interface ColorPickerProps {
@@ -10,6 +10,8 @@ interface ColorPickerProps {
   onColorSave: (color: string) => void
   isDrawMode: boolean
   onDrawModeSelect: () => void
+  isEraseMode: boolean
+  onEraseModeToggle: (enabled: boolean) => void
   isColorPickerMode: boolean
   onColorPickerModeToggle: (enabled: boolean) => void
   isFillMode: boolean
@@ -29,6 +31,8 @@ export default function ColorPicker({
   onColorSave,
   isDrawMode,
   onDrawModeSelect,
+  isEraseMode,
+  onEraseModeToggle,
   isColorPickerMode,
   onColorPickerModeToggle,
   isFillMode,
@@ -89,6 +93,15 @@ export default function ColorPicker({
           aria-pressed={isDrawMode}
         >
           <PencilIcon className={styles.toolIcon} />
+        </button>
+        <button
+          onClick={() => onEraseModeToggle(!isEraseMode)}
+          className={`${styles.toolButton} ${isEraseMode ? styles.active : ''}`}
+          title={isEraseMode ? 'Eraser tool active (E)' : 'Eraser tool (E)'}
+          aria-label="Eraser tool"
+          aria-pressed={isEraseMode}
+        >
+          <EraserIcon className={styles.toolIcon} />
         </button>
         <button
           onClick={() => onFillModeToggle(!isFillMode)}

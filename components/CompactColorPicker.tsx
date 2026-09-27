@@ -1,6 +1,6 @@
 'use client'
 
-import { PencilIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon } from './icons'
+import { PencilIcon, EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon } from './icons'
 import styles from './CompactColorPicker.module.css'
 
 interface CompactColorPickerProps {
@@ -9,6 +9,8 @@ interface CompactColorPickerProps {
   onColorSave: (color: string) => void
   isDrawMode: boolean
   onDrawModeSelect: () => void
+  isEraseMode: boolean
+  onEraseModeToggle: (enabled: boolean) => void
   isColorPickerMode: boolean
   onColorPickerModeToggle: (enabled: boolean) => void
   isFillMode: boolean
@@ -28,6 +30,8 @@ export default function CompactColorPicker({
   onColorSave,
   isDrawMode,
   onDrawModeSelect,
+  isEraseMode,
+  onEraseModeToggle,
   isColorPickerMode,
   onColorPickerModeToggle,
   isFillMode,
@@ -75,6 +79,14 @@ export default function CompactColorPicker({
         aria-pressed={isDrawMode}
       >
         <PencilIcon className={styles.pickerIcon} />
+      </button>
+      <button
+        onClick={() => onEraseModeToggle(!isEraseMode)}
+        className={`${styles.pickerButton} ${isEraseMode ? styles.active : ''}`}
+        title="Eraser tool (E)"
+        aria-pressed={isEraseMode}
+      >
+        <EraserIcon className={styles.pickerIcon} />
       </button>
       <button
         onClick={() => onFillModeToggle(!isFillMode)}
