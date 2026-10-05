@@ -23,10 +23,63 @@
 .canvas {
   display: grid;
   background: #f9f9f9;
-  border: 2px solid #ddd;
+  border: var(--canvas-border-width) solid #ddd;
   border-radius: 4px;
   overflow: hidden;
   flex-shrink: 0;
+}
+
+/* ─── Row/column number rulers ────────────────────────────────────────────── */
+.rulerLayout {
+  /* Shared with .canvas so the rulers' first track starts exactly where
+     the first cell does, inside the canvas border. */
+  --canvas-border-width: 2px;
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  gap: 2px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.colRuler,
+.rowRuler {
+  display: flex;
+  color: #888;
+  font-size: 10px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.colRuler {
+  flex-direction: row;
+  align-items: flex-end;
+  padding-left: var(--canvas-border-width);
+}
+
+.rowRuler {
+  flex-direction: column;
+  align-items: flex-end;
+  padding-top: var(--canvas-border-width);
+}
+
+.rulerLabel {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.rowRuler .rulerLabel {
+  justify-content: flex-end;
+  padding-right: 2px;
+}
+
+.colRuler .rulerLabel {
+  padding-bottom: 2px;
 }
 
 /* ─── Pixel (and states) ───────────────────────────────────────────────────── */
@@ -158,6 +211,10 @@
     flex-shrink: 0;
     flex-grow: 0;
     overflow: visible;
+  }
+
+  .rulerLayout {
+    --canvas-border-width: 0px;
   }
 
   .canvas {
