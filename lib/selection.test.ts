@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeRect, copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from './selection'
+import { normalizeRect, copySelectionCells, clearRectFromGrid, pasteClipboardToGrid, mirrorRectHorizontally } from './selection'
 
 describe('normalizeRect', () => {
   it('orders corners regardless of drag direction', () => {
@@ -93,5 +93,27 @@ describe('pasteClipboardToGrid', () => {
     const clipboard = { width: 1, height: 1, cells: { '0,0': '#ff0000' } }
     pasteClipboardToGrid(grid, clipboard, 0, 0, 10, 10)
     expect(grid).toEqual({})
+  })
+})
+
+describe('mirrorRectHorizontally', () => {
+  it('flips cells left-to-right within the rect, moving empty cells too', () => {
+    const grid = { '0,0': '#ff0000', '0,1': '#00ff00', '1,0': '#0000ff' }
+    const result = mirrorRectHorizontally(grid, { startRow: 0, startCol: 0, endRow: 1, endCol: 2 })
+
+    expect(result).toEqual({ '0,2': '#ff0000', '0,1': '#00ff00', '1,2': '#0000ff' })
+  })
+
+  it('leaves cells outside the rect untouched', () => {
+    const grid = { '0,0': '#ff0000', '0,3': '#000000', '2,1': '#00ff00' }
+    const result = mirrorRectHorizontally(grid, { startRow: 0, startCol: 1, endRow: 1, endCol: 2 })
+
+    expect(result).toEqual(grid)
+  })
+
+  it('does not mutate the input grid', () => {
+    const grid = { '0,0': '#000000' }
+    mirrorRectHorizontally(grid, { startRow: 0, startCol: 0, endRow: 0, endCol: 1 })
+    expect(grid).toEqual({ '0,0': '#000000' })
   })
 })

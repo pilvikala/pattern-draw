@@ -1,6 +1,6 @@
 'use client'
 
-import { PencilIcon, EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon } from './icons'
+import { PencilIcon, EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
 import styles from './CompactColorPicker.module.css'
 
 interface CompactColorPickerProps {
@@ -22,6 +22,7 @@ interface CompactColorPickerProps {
   onCopy: () => void
   onCut: () => void
   onPaste: () => void
+  onMirror: () => void
 }
 
 export default function CompactColorPicker({
@@ -43,6 +44,7 @@ export default function CompactColorPicker({
   onCopy,
   onCut,
   onPaste,
+  onMirror,
 }: CompactColorPickerProps) {
   const handleSave = () => {
     onColorSave(selectedColor)
@@ -143,6 +145,14 @@ export default function CompactColorPicker({
         title="Paste (Ctrl+V)"
       >
         <PasteIcon className={styles.pickerIcon} />
+      </button>
+      <button
+        onClick={onMirror}
+        disabled={!canCopy}
+        className={styles.pickerButton}
+        title="Mirror selection (Ctrl+I)"
+      >
+        <MirrorIcon className={styles.pickerIcon} />
       </button>
     </div>
   )
