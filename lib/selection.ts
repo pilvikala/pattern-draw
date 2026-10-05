@@ -66,3 +66,21 @@ export function pasteClipboardToGrid(
   }
   return newGrid
 }
+
+// Flips the cells inside the rect left-to-right in place. Empty cells move
+// too, so the mirrored area is an exact reflection of the original.
+export function mirrorRectHorizontally(
+  grid: { [key: string]: string },
+  rect: SelectionRect
+): { [key: string]: string } {
+  const newGrid = clearRectFromGrid(grid, rect)
+  for (let row = rect.startRow; row <= rect.endRow; row++) {
+    for (let col = rect.startCol; col <= rect.endCol; col++) {
+      const color = grid[`${row},${col}`]
+      if (!color) continue
+      const mirroredCol = rect.startCol + rect.endCol - col
+      newGrid[`${row},${mirroredCol}`] = color
+    }
+  }
+  return newGrid
+}

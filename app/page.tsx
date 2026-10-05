@@ -13,7 +13,7 @@ import LayersPanel from '@/components/LayersPanel'
 import LayersDrawer from '@/components/LayersDrawer'
 import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
 import { floodFillGrid } from '@/lib/floodFill'
-import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
+import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid, mirrorRectHorizontally } from '@/lib/selection'
 import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, mergeLayerDown, MAX_LAYERS, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
 import { trimHistoryToBudget } from '@/lib/history'
 import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry } from '@/lib/types'
@@ -504,8 +504,68 @@ function HomeContent() {
     setSelection(null)
   }, [])
 
-  // Keyboard shortcuts: tool switching (P/E/F/C/S) and select-tool actions
-  // (copy/cut/paste/delete/deselect). Ignored while typing in a text input
+  const handleMirror = useCallback(() => {
+    if (!selection) return
+    updateActiveLayerGrid((prev) => mirrorRectHorizontally(prev, selection), saveToHistoryImmediate)
+  }, [selection, saveToHistoryImmediate, updateActiveLayerGrid])
+
+  const handleUndo = useCallback(() => {
+    saveToHistoryImmediate()
+
+    setTimeout(() => {
+      const currentIdx = historyIndexRef.current
+      const currentHistory = historyRef.current
+      if (currentIdx > 0) {
+        isUndoRedoRef.current = true
+        const newIndex = currentIdx - 1
+        const entry = currentHistory[newIndex]
+        setHistoryIndex(newIndex)
+        historyIndexRef.current = newIndex
+        setLayers(entry.layers)
+        layersRef.current = entry.layers
+        lastSavedLayersRef.current = entry.layers
+        // Restore whichever layer was active at this point in history, not
+        // wherever the (now possibly-reordered/deleted) currently-active
+        // index happens to land - see HistoryEntry.
+        const restoredActive = clampActiveLayerIndex(entry.activeLayerIndex, entry.layers.length)
+        setActiveLayerIndex(restoredActive)
+        activeLayerIndexRef.current = restoredActive
+        setSelection(null)
+        setTimeout(() => {
+          isUndoRedoRef.current = false
+        }, 0)
+      }
+    }, 10)
+  }, [saveToHistoryImmediate])
+
+  const handleRedo = useCallback(() => {
+    saveToHistoryImmediate()
+
+    setTimeout(() => {
+      const currentIdx = historyIndexRef.current
+      const currentHistory = historyRef.current
+      if (currentIdx < currentHistory.length - 1) {
+        isUndoRedoRef.current = true
+        const newIndex = currentIdx + 1
+        const entry = currentHistory[newIndex]
+        setHistoryIndex(newIndex)
+        historyIndexRef.current = newIndex
+        setLayers(entry.layers)
+        layersRef.current = entry.layers
+        lastSavedLayersRef.current = entry.layers
+        const restoredActive = clampActiveLayerIndex(entry.activeLayerIndex, entry.layers.length)
+        setActiveLayerIndex(restoredActive)
+        activeLayerIndexRef.current = restoredActive
+        setSelection(null)
+        setTimeout(() => {
+          isUndoRedoRef.current = false
+        }, 0)
+      }
+    }, 10)
+  }, [saveToHistoryImmediate])
+
+  // Keyboard shortcuts: undo/redo, tool switching (P/E/F/C/S) and
+  // select-tool actions (copy/cut/paste/mirror/delete/deselect). Ignored while typing in a text input
   // so hex-color and canvas-size fields keep working.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -517,7 +577,19 @@ function HomeContent() {
       const noModifiers = !e.metaKey && !e.ctrlKey && !e.altKey
       const key = e.key.toLowerCase()
 
-      if (isMeta && key === 'c') {
+      if (isMeta && key === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) handleRedo()
+        else handleUndo()
+      } else if (isMeta && key === 'y') {
+        e.preventDefault()
+        handleRedo()
+      } else if (isMeta && key === 'i') {
+        if (tool === 'select' && selection) {
+          e.preventDefault()
+          handleMirror()
+        }
+      } else if (isMeta && key === 'c') {
         if (tool === 'select' && selection) {
           e.preventDefault()
           handleCopy()
@@ -560,7 +632,7 @@ function HomeContent() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [tool, selection, clipboard, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleEraseModeToggle, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
+  }, [tool, selection, clipboard, handleUndo, handleRedo, handleMirror, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleEraseModeToggle, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
 
   const handlePixelFill = (key: string, color: string) => {
     if (tool === 'colorPicker') {
@@ -601,61 +673,6 @@ function HomeContent() {
         () => { if (!isUndoRedoRef.current) saveToHistory() }
       )
     }
-  }
-
-  const handleUndo = () => {
-    saveToHistoryImmediate()
-
-    setTimeout(() => {
-      const currentIdx = historyIndexRef.current
-      const currentHistory = historyRef.current
-      if (currentIdx > 0) {
-        isUndoRedoRef.current = true
-        const newIndex = currentIdx - 1
-        const entry = currentHistory[newIndex]
-        setHistoryIndex(newIndex)
-        historyIndexRef.current = newIndex
-        setLayers(entry.layers)
-        layersRef.current = entry.layers
-        lastSavedLayersRef.current = entry.layers
-        // Restore whichever layer was active at this point in history, not
-        // wherever the (now possibly-reordered/deleted) currently-active
-        // index happens to land - see HistoryEntry.
-        const restoredActive = clampActiveLayerIndex(entry.activeLayerIndex, entry.layers.length)
-        setActiveLayerIndex(restoredActive)
-        activeLayerIndexRef.current = restoredActive
-        setSelection(null)
-        setTimeout(() => {
-          isUndoRedoRef.current = false
-        }, 0)
-      }
-    }, 10)
-  }
-
-  const handleRedo = () => {
-    saveToHistoryImmediate()
-
-    setTimeout(() => {
-      const currentIdx = historyIndexRef.current
-      const currentHistory = historyRef.current
-      if (currentIdx < currentHistory.length - 1) {
-        isUndoRedoRef.current = true
-        const newIndex = currentIdx + 1
-        const entry = currentHistory[newIndex]
-        setHistoryIndex(newIndex)
-        historyIndexRef.current = newIndex
-        setLayers(entry.layers)
-        layersRef.current = entry.layers
-        lastSavedLayersRef.current = entry.layers
-        const restoredActive = clampActiveLayerIndex(entry.activeLayerIndex, entry.layers.length)
-        setActiveLayerIndex(restoredActive)
-        activeLayerIndexRef.current = restoredActive
-        setSelection(null)
-        setTimeout(() => {
-          isUndoRedoRef.current = false
-        }, 0)
-      }
-    }, 10)
   }
 
   const handleClear = () => {
@@ -1126,7 +1143,7 @@ function HomeContent() {
                     disabled={historyIndex === 0}
                     className={styles.undoRedoButton}
                     aria-label="Undo"
-                    title="Undo"
+                    title="Undo (Ctrl+Z)"
                   >
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M3 7v6h6" />
@@ -1138,7 +1155,7 @@ function HomeContent() {
                     disabled={historyIndex >= history.length - 1}
                     className={styles.undoRedoButton}
                     aria-label="Redo"
-                    title="Redo"
+                    title="Redo (Ctrl+Shift+Z)"
                   >
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 7v6h-6" />
@@ -1194,6 +1211,7 @@ function HomeContent() {
                 onCopy={handleCopy}
                 onCut={handleCut}
                 onPaste={handlePaste}
+                onMirror={handleMirror}
               />
               <ColorPalette
                 colors={savedColors}
@@ -1276,6 +1294,7 @@ function HomeContent() {
                 onCopy={handleCopy}
                 onCut={handleCut}
                 onPaste={handlePaste}
+                onMirror={handleMirror}
               />
               <ColorPalette
                 colors={savedColors}

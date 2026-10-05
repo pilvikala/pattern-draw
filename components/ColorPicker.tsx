@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef } from 'react'
-import { PencilIcon, EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon } from './icons'
+import { PencilIcon, EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
 import styles from './ColorPicker.module.css'
 
 interface ColorPickerProps {
@@ -23,6 +23,7 @@ interface ColorPickerProps {
   onCopy: () => void
   onCut: () => void
   onPaste: () => void
+  onMirror: () => void
 }
 
 export default function ColorPicker({
@@ -44,6 +45,7 @@ export default function ColorPicker({
   onCopy,
   onCut,
   onPaste,
+  onMirror,
 }: ColorPickerProps) {
   const colorInputRef = useRef<HTMLInputElement>(null)
 
@@ -156,6 +158,15 @@ export default function ColorPicker({
           aria-label="Paste"
         >
           <PasteIcon className={styles.toolIcon} />
+        </button>
+        <button
+          onClick={onMirror}
+          disabled={!canCopy}
+          className={styles.toolButton}
+          title="Mirror selection (Ctrl+I)"
+          aria-label="Mirror selection"
+        >
+          <MirrorIcon className={styles.toolIcon} />
         </button>
       </div>
     </div>

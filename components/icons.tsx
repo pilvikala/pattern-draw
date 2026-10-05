@@ -123,3 +123,21 @@ export function PasteIcon({ className }: IconProps) {
     </svg>
   )
 }
+
+export function MirrorIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 2v20" strokeDasharray="3 2" />
+      <path d="M9 6 3 18h6z" />
+      <path d="M15 6l6 12h-6z" />
+    </svg>
+  )
+}
