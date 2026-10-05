@@ -35,6 +35,43 @@ const Pixel = memo(function Pixel({ row, col, color, pixelSize, offsetAxis, offs
   )
 })
 
+// Smallest step (every Nth row/column gets a number) that keeps adjacent
+// labels from overlapping at the current pixel size.
+const LABEL_STEPS = [1, 2, 5, 10, 20, 50]
+function getLabelStep(pixelSize: number, minSpacing: number): number {
+  return LABEL_STEPS.find((step) => step * pixelSize >= minSpacing) ?? LABEL_STEPS[LABEL_STEPS.length - 1]
+}
+
+interface RulerProps {
+  count: number
+  pixelSize: number
+  step: number
+  orientation: 'horizontal' | 'vertical'
+}
+
+// Row/column numbers shown alongside the grid. Numbers are 1-based, as
+// people count rows when following a pattern, and sit in the same
+// pixelSize-wide tracks as the cells so they line up (and zoom) with them.
+const Ruler = memo(function Ruler({ count, pixelSize, step, orientation }: RulerProps) {
+  const isHorizontal = orientation === 'horizontal'
+  return (
+    <div className={isHorizontal ? styles.colRuler : styles.rowRuler} aria-hidden="true">
+      {Array.from({ length: count }).map((_, i) => {
+        const n = i + 1
+        return (
+          <span
+            key={n}
+            className={styles.rulerLabel}
+            style={isHorizontal ? { width: `${pixelSize}px` } : { height: `${pixelSize}px` }}
+          >
+            {n % step === 0 || step === 1 ? n : ''}
+          </span>
+        )
+      })}
+    </div>
+  )
+})
+
 interface DrawingCanvasProps {
   pattern: MatrixPattern
   pixelSize: number
@@ -111,6 +148,9 @@ export default function DrawingCanvas({
   const isScrollingRef = useRef(false)
 
   const dimensions = { cols: canvasWidth, rows: canvasHeight }
+  // ~6px per digit at the ruler's font size, plus a sliver of breathing room.
+  const colLabelStep = getLabelStep(pixelSize, String(dimensions.cols).length * 6 + 2)
+  const rowLabelStep = getLabelStep(pixelSize, 12)
 
   const getPixelKey = (row: number, col: number): string => {
     return `${row},${col}`
@@ -788,63 +828,55 @@ export default function DrawingCanvas({
           transformOrigin: 'top center',
         }}
       >
-        <div
-          ref={containerRef}
-          className={`${styles.canvas} ${isColorPickerMode ? styles.colorPickerMode : ''} ${isFillMode ? styles.fillMode : ''} ${isSelectMode ? styles.selectMode : ''}`}
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${dimensions.cols}, ${pixelSize}px)`,
-            gridTemplateRows: `repeat(${dimensions.rows}, ${pixelSize}px)`,
-            userSelect: 'none',
-            touchAction: 'none',
-            position: 'relative',
-            width: pattern === 'bricks' ? `${3 + dimensions.cols * pixelSize + pixelSize / 2}px` : `${3 + dimensions.cols * pixelSize}px`,
-            height: pattern === 'bricksVertical' ? `${3 + dimensions.rows * pixelSize + pixelSize / 2}px` : `${3 + dimensions.rows * pixelSize}px`,
-            margin: 'auto',
-            flexShrink: 0,
-          }}
-          onMouseDown={handleContainerMouseDown}
-          onMouseMove={handleCanvasMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseLeave}
-        >
-          {Array.from({ length: dimensions.rows }).map((_, row) =>
-            Array.from({ length: dimensions.cols }).map((_, col) => {
-              if (pattern === 'bricks') {
-                return renderBrick(row, col)
-              } else if (pattern === 'bricksVertical') {
-                return renderBrickVertical(row, col)
-              } else {
-                return renderSquare(row, col)
-              }
-            })
-          )}
+        <div className={styles.rulerLayout}>
+          <div className={styles.rulerCorner} />
+          <Ruler
+            count={dimensions.cols}
+            pixelSize={pixelSize}
+            step={colLabelStep}
+            orientation="horizontal"
+          />
+          <Ruler
+            count={dimensions.rows}
+            pixelSize={pixelSize}
+            step={rowLabelStep}
+            orientation="vertical"
+          />
+          <div
+            ref={containerRef}
+            className={`${styles.canvas} ${isColorPickerMode ? styles.colorPickerMode : ''} ${isFillMode ? styles.fillMode : ''} ${isSelectMode ? styles.selectMode : ''}`}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${dimensions.cols}, ${pixelSize}px)`,
+              gridTemplateRows: `repeat(${dimensions.rows}, ${pixelSize}px)`,
+              userSelect: 'none',
+              touchAction: 'none',
+              position: 'relative',
+              width: pattern === 'bricks' ? `${3 + dimensions.cols * pixelSize + pixelSize / 2}px` : `${3 + dimensions.cols * pixelSize}px`,
+              height: pattern === 'bricksVertical' ? `${3 + dimensions.rows * pixelSize + pixelSize / 2}px` : `${3 + dimensions.rows * pixelSize}px`,
+              margin: 'auto',
+              flexShrink: 0,
+            }}
+            onMouseDown={handleContainerMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+          >
+            {Array.from({ length: dimensions.rows }).map((_, row) =>
+              Array.from({ length: dimensions.cols }).map((_, col) => {
+                if (pattern === 'bricks') {
+                  return renderBrick(row, col)
+                } else if (pattern === 'bricksVertical') {
+                  return renderBrickVertical(row, col)
+                } else {
+                  return renderSquare(row, col)
+                }
+              })
+            )}
 
-          {isSelectMode && selection && !isMovingSelection && (
-            <div
-              className={styles.selectionMarquee}
-              style={{
-                left: `${selection.startCol * pixelSize}px`,
-                top: `${selection.startRow * pixelSize}px`,
-                width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
-                height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
-              }}
-            />
-          )}
-
-          {isSelectMode && selection && isMovingSelection && movingSnapshotRef.current && (
-            <>
-              {/* Renders the other (non-active) layers for this rect onto a
-                  canvas - not one <div> per cell - so the hole left by the
-                  active layer's content actually shows what's really
-                  underneath (rather than standing in a fake "empty" color)
-                  without creating up to 250,000 DOM nodes on a full-canvas
-                  selection. The drawing effect above paints its pixels. */}
-              <canvas
-                ref={holeCanvasRef}
-                className={styles.selectionHole}
-                width={selection.endCol - selection.startCol + 1}
-                height={selection.endRow - selection.startRow + 1}
+            {isSelectMode && selection && !isMovingSelection && (
+              <div
+                className={styles.selectionMarquee}
                 style={{
                   left: `${selection.startCol * pixelSize}px`,
                   top: `${selection.startRow * pixelSize}px`,
@@ -852,20 +884,43 @@ export default function DrawingCanvas({
                   height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
                 }}
               />
-              <canvas
-                ref={floatingCanvasRef}
-                className={styles.selectionFloating}
-                width={selection.endCol - selection.startCol + 1}
-                height={selection.endRow - selection.startRow + 1}
-                style={{
-                  left: `${(selection.startCol + moveDelta.dCol) * pixelSize}px`,
-                  top: `${(selection.startRow + moveDelta.dRow) * pixelSize}px`,
-                  width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
-                  height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
-                }}
-              />
-            </>
-          )}
+            )}
+
+            {isSelectMode && selection && isMovingSelection && movingSnapshotRef.current && (
+              <>
+                {/* Renders the other (non-active) layers for this rect onto a
+                    canvas - not one <div> per cell - so the hole left by the
+                    active layer's content actually shows what's really
+                    underneath (rather than standing in a fake "empty" color)
+                    without creating up to 250,000 DOM nodes on a full-canvas
+                    selection. The drawing effect above paints its pixels. */}
+                <canvas
+                  ref={holeCanvasRef}
+                  className={styles.selectionHole}
+                  width={selection.endCol - selection.startCol + 1}
+                  height={selection.endRow - selection.startRow + 1}
+                  style={{
+                    left: `${selection.startCol * pixelSize}px`,
+                    top: `${selection.startRow * pixelSize}px`,
+                    width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
+                    height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
+                  }}
+                />
+                <canvas
+                  ref={floatingCanvasRef}
+                  className={styles.selectionFloating}
+                  width={selection.endCol - selection.startCol + 1}
+                  height={selection.endRow - selection.startRow + 1}
+                  style={{
+                    left: `${(selection.startCol + moveDelta.dCol) * pixelSize}px`,
+                    top: `${(selection.startRow + moveDelta.dRow) * pixelSize}px`,
+                    width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
+                    height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
+                  }}
+                />
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
