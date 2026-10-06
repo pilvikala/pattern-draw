@@ -16,7 +16,7 @@ import { floodFillGrid } from '@/lib/floodFill'
 import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid, mirrorRectHorizontally } from '@/lib/selection'
 import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, mergeLayerDown, MAX_LAYERS, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
 import { trimHistoryToBudget } from '@/lib/history'
-import { paintCell, cellColorAt, drawCell, PIXEL_SHAPES } from '@/lib/cells'
+import { paintCell, cellColorAt, cellQuarters, quarterAt, drawCell, PIXEL_SHAPES } from '@/lib/cells'
 import type { PixelShape } from '@/lib/cells'
 import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry } from '@/lib/types'
 import { TRANSPARENT } from '@/lib/types'
@@ -664,12 +664,15 @@ function HomeContent() {
       const [rowStr, colStr] = key.split(',')
       const row = parseInt(rowStr, 10)
       const col = parseInt(colStr, 10)
+      // Fill starts from the clicked quarter of the cell, so clicking the
+      // empty half of a half-pixel fills the area around it, not the cell.
       const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
-      const targetColor = activeGrid[key] || TRANSPARENT
+      const startQuarter = quarterAt(point?.x ?? 0.5, point?.y ?? 0.5)
+      const targetColor = cellQuarters(activeGrid[key])[startQuarter] || TRANSPARENT
       if (targetColor === color) return
 
       updateActiveLayerGrid(
-        (prev) => floodFillGrid(prev, row, col, targetColor, color, canvasWidth, canvasHeight),
+        (prev) => floodFillGrid(prev, row, col, targetColor, color, canvasWidth, canvasHeight, startQuarter),
         () => { if (!isUndoRedoRef.current) saveToHistory() }
       )
     } else if (tool === 'erase') {

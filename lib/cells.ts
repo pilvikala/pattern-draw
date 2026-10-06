@@ -102,12 +102,16 @@ export function mirrorCellHorizontally(value: string): string {
 // clicking either half of a half-pixel picks that half's color.
 export function cellColorAt(value: string | undefined, x: number, y: number): string {
   if (!isSplitCell(value)) return value || TRANSPARENT
-  const quarters = cellQuarters(value)
+  return cellQuarters(value)[quarterAt(x, y)]
+}
+
+// Index (into CellQuarters) of the quarter containing the point (x, y),
+// given as fractions of the cell's size.
+export function quarterAt(x: number, y: number): number {
   // The diagonals y = x and y = 1 - x split the cell into the four quarters.
   const belowMain = y > x
   const belowAnti = y > 1 - x
-  const quarter = belowMain ? (belowAnti ? BOTTOM : LEFT) : (belowAnti ? RIGHT : TOP)
-  return quarters[quarter]
+  return belowMain ? (belowAnti ? BOTTOM : LEFT) : (belowAnti ? RIGHT : TOP)
 }
 
 // CSS `background` value for rendering a cell, with `emptyColor` showing
