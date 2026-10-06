@@ -1,5 +1,6 @@
 import type { DrawingData } from '@/lib/types'
 import { compositeLayers } from '@/lib/layers'
+import { drawCell } from '@/lib/cells'
 
 /**
  * Generates a data URL for a drawing preview image
@@ -50,7 +51,7 @@ export function generateDrawingPreview(
     for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
             const key = `${row},${col}`
-            const color = grid[key] || '#ffffff'
+            const color = grid[key]
 
             let x = col * pixelSize
             let y = row * pixelSize
@@ -62,9 +63,9 @@ export function generateDrawingPreview(
                 y += pixelSize / 2
             }
 
-            // Fill pixel
-            ctx.fillStyle = color
-            ctx.fillRect(x, y, pixelSize, pixelSize)
+            // Fill pixel - empty cells and the empty part of a half-pixel
+            // keep the white background filled above.
+            drawCell(ctx, color, x, y, pixelSize)
 
             // Draw border (only if scale is large enough)
             if (scale > 0.3) {

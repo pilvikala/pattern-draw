@@ -116,4 +116,10 @@ describe('mirrorRectHorizontally', () => {
     mirrorRectHorizontally(grid, { startRow: 0, startCol: 0, endRow: 0, endCol: 1 })
     expect(grid).toEqual({ '0,0': '#000000' })
   })
+
+  it('flips half-pixels within their cell', () => {
+    const grid = { '0,0': '#ff0000,,,#ff0000' }
+    const result = mirrorRectHorizontally(grid, { startRow: 0, startCol: 0, endRow: 0, endCol: 1 })
+    expect(result).toEqual({ '0,1': '#ff0000,#ff0000,,' })
+  })
 })

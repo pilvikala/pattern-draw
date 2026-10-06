@@ -4,11 +4,14 @@ import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
 import type { MatrixPattern, Tool, SelectionRect, Layer } from '@/lib/types'
 import { normalizeRect } from '@/lib/selection'
 import { compositeLayers } from '@/lib/layers'
+import { TRANSPARENT } from '@/lib/types'
+import { cellBackground, compositeCell, drawCell } from '@/lib/cells'
 import styles from './DrawingCanvas.module.css'
 
 interface PixelProps {
   row: number
   col: number
+  // A cell value (see lib/cells.ts) - a color, a half-pixel, or TRANSPARENT.
   color: string
   pixelSize: number
   offsetAxis: 'x' | 'y' | 'none'
@@ -27,7 +30,8 @@ const Pixel = memo(function Pixel({ row, col, color, pixelSize, offsetAxis, offs
       style={{
         width: `${pixelSize}px`,
         height: `${pixelSize}px`,
-        backgroundColor: color,
+        // Empty cells and the empty part of a half-pixel show the white "paper".
+        background: cellBackground(color, '#ffffff'),
         border: '1px solid #ddd',
         transform: offsetAxis === 'none' ? 'none' : offsetAxis === 'x' ? `translateX(${offset}px)` : `translateY(${offset}px)`,
       }}
@@ -38,6 +42,15 @@ const Pixel = memo(function Pixel({ row, col, color, pixelSize, offsetAxis, offs
 // Smallest step (every Nth row/column gets a number) that keeps adjacent
 // labels from overlapping at the current pixel size.
 const LABEL_STEPS = [1, 2, 5, 10, 20, 50]
+
+// Backing-store pixels per cell for the moving-selection canvases: enough to
+// draw half-pixel triangles legibly, while capping the longest side so a
+// full 500x500 selection stays a small canvas (see the paint effect below).
+const MAX_PREVIEW_CANVAS_SIDE = 2048
+const MAX_PREVIEW_CELL_SCALE = 32
+function getPreviewCellScale(width: number, height: number): number {
+  return Math.max(1, Math.min(MAX_PREVIEW_CELL_SCALE, Math.floor(MAX_PREVIEW_CANVAS_SIDE / Math.max(width, height))))
+}
 function getLabelStep(pixelSize: number, minSpacing: number): number {
   return LABEL_STEPS.find((step) => step * pixelSize >= minSpacing) ?? LABEL_STEPS[LABEL_STEPS.length - 1]
 }
@@ -93,7 +106,9 @@ interface DrawingCanvasProps {
   // changing would still redo this work on every marquee-drag mousemove.
   layers: Layer[]
   activeLayerIndex: number
-  onPixelFill: (key: string, color: string) => void
+  // `point` is the pointer position inside the cell, as fractions (0-1) of
+  // its size - lets the color picker tell the halves of a half-pixel apart.
+  onPixelFill: (key: string, color: string, point?: { x: number; y: number }) => void
   tool: Tool
   selection: SelectionRect | null
   onSelectionChange: (rect: SelectionRect | null) => void
@@ -158,7 +173,7 @@ export default function DrawingCanvas({
 
   const getPixelColor = (row: number, col: number): string => {
     const key = getPixelKey(row, col)
-    return grid[key] || '#ffffff'
+    return grid[key] || TRANSPARENT
   }
 
   const getActiveLayerPixelColor = (row: number, col: number): string => {
@@ -167,7 +182,7 @@ export default function DrawingCanvas({
     // moving-selection preview floats above the already-rendered composite,
     // so an empty active-layer cell must stay see-through here - falling
     // back to white would paint over whatever's on a layer beneath it.
-    return activeLayerGrid[key] || 'transparent'
+    return activeLayerGrid[key] || TRANSPARENT
   }
 
   const isInsideSelection = (row: number, col: number): boolean => {
@@ -180,10 +195,23 @@ export default function DrawingCanvas({
     )
   }
 
-  const handlePixelClick = useCallback((row: number, col: number) => {
+  const handlePixelClick = useCallback((row: number, col: number, point?: { x: number; y: number }) => {
     const key = getPixelKey(row, col)
-    onPixelFill(key, selectedColor)
+    onPixelFill(key, selectedColor, point)
   }, [onPixelFill, selectedColor])
+
+  // Where (clientX, clientY) falls inside the cell at (row, col), as
+  // fractions of the cell's size, accounting for zoom and brick offsets.
+  const getPointInCell = useCallback((clientX: number, clientY: number, row: number, col: number): { x: number; y: number } | undefined => {
+    if (!containerRef.current) return undefined
+    const rect = containerRef.current.getBoundingClientRect()
+    let x = (clientX - rect.left) / zoom
+    let y = (clientY - rect.top) / zoom
+    if (pattern === 'bricks' && row % 2 === 1) x -= pixelSize / 2
+    if (pattern === 'bricksVertical' && col % 2 === 1) y -= pixelSize / 2
+    const clamp = (v: number) => Math.max(0, Math.min(1, v))
+    return { x: clamp(x / pixelSize - col), y: clamp(y / pixelSize - row) }
+  }, [pattern, pixelSize, zoom])
 
   // Shared pattern-aware coordinate math used by select-mode dragging.
   const getCellFromPoint = useCallback((clientX: number, clientY: number): { row: number; col: number } | null => {
@@ -224,7 +252,7 @@ export default function DrawingCanvas({
     return { row, col }
   }, [pattern, pixelSize, dimensions, zoom])
 
-  const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
+  const handleMouseDown = (e: React.MouseEvent, row: number, col: number, point?: { x: number; y: number }) => {
     e.preventDefault()
     if (isSelectMode) {
       if (selection && isInsideSelection(row, col)) {
@@ -248,7 +276,7 @@ export default function DrawingCanvas({
       return
     }
     if (isSingleClickMode) {
-      handlePixelClick(row, col)
+      handlePixelClick(row, col, point)
       return
     }
     setIsDrawing(true)
@@ -263,7 +291,12 @@ export default function DrawingCanvas({
     const rowAttr = target.dataset.row
     const colAttr = target.dataset.col
     if (rowAttr === undefined || colAttr === undefined) return
-    handleMouseDown(e, Number(rowAttr), Number(colAttr))
+    const rect = target.getBoundingClientRect()
+    const point = {
+      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
+    }
+    handleMouseDown(e, Number(rowAttr), Number(colAttr), point)
   }
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
@@ -423,7 +456,7 @@ export default function DrawingCanvas({
       if (col >= 0 && col < dimensions.cols && row >= 0 && row < dimensions.rows) {
         if (isSingleClickMode) {
           // Color picker / fill mode - act immediately on a single tap
-          handlePixelClick(row, col)
+          handlePixelClick(row, col, getPointInCell(touch.clientX, touch.clientY, row, col))
           e.preventDefault()
         } else {
           // Drawing mode - delay start to detect if second finger is coming or if scrolling
@@ -441,7 +474,7 @@ export default function DrawingCanvas({
         }
       }
     }
-  }, [isSingleClickMode, isSelectMode, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange, activeLayerGrid])
+  }, [isSingleClickMode, isSelectMode, pattern, pixelSize, dimensions, handlePixelClick, getPointInCell, zoom, getCellFromPoint, selection, onSelectionChange, activeLayerGrid])
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     // Handle pinch gesture
@@ -674,10 +707,7 @@ export default function DrawingCanvas({
     // "paper" as the base canvas, so an empty cell here (nothing on any
     // other layer) correctly falls back to white rather than 'transparent'.
     const getBelowActiveLayerPixelColor = (row: number, col: number): string =>
-      dragComposites.below[getPixelKey(row, col)] || '#ffffff'
-    // No fallback: `undefined` here means "nothing above the active layer
-    // at this cell", distinct from a painted-but-white cell, so the caller
-    // can tell whether to let it take over from the dragged color.
+      compositeCell('#ffffff', dragComposites.below[getPixelKey(row, col)])
     const getAboveActiveLayerPixelColor = (row: number, col: number): string | undefined =>
       dragComposites.above[getPixelKey(row, col)]
     // compositeLayers skips hidden layers everywhere else (the base canvas,
@@ -688,19 +718,20 @@ export default function DrawingCanvas({
     // pixels that are supposed to be invisible everywhere else.
     const isActiveLayerHidden = layers[activeLayerIndex]?.visible === false
 
-    // The backing store is one pixel per cell (not pixelSize per cell) and
+    // The backing store is a few pixels per cell (not pixelSize per cell) and
     // scaled up to the on-screen size via CSS instead - at the maximum
     // canvas size and pixelSize (500 cells x 50px), a pixelSize-scaled
     // backing store would be 25,000x25,000px, around 2.5GB per canvas,
-    // which can hang or crash the tab on a large selection.
+    // which can hang or crash the tab on a large selection. See
+    // getPreviewCellScale for how many pixels each cell gets.
+    const scale = getPreviewCellScale(width, height)
     const holeCtx = holeCanvasRef.current?.getContext('2d')
     if (holeCtx) {
       holeCtx.imageSmoothingEnabled = false
-      holeCtx.clearRect(0, 0, width, height)
+      holeCtx.clearRect(0, 0, width * scale, height * scale)
       for (let r = 0; r < height; r++) {
         for (let c = 0; c < width; c++) {
-          holeCtx.fillStyle = getBelowActiveLayerPixelColor(selection.startRow + r, selection.startCol + c)
-          holeCtx.fillRect(c, r, 1, 1)
+          drawCell(holeCtx, getBelowActiveLayerPixelColor(selection.startRow + r, selection.startCol + c), c * scale, r * scale, scale)
         }
       }
     }
@@ -708,40 +739,35 @@ export default function DrawingCanvas({
     const floatingCtx = floatingCanvasRef.current?.getContext('2d')
     if (floatingCtx && movingSnapshotRef.current) {
       floatingCtx.imageSmoothingEnabled = false
-      floatingCtx.clearRect(0, 0, width, height)
+      floatingCtx.clearRect(0, 0, width * scale, height * scale)
       movingSnapshotRef.current.forEach((rowColors, r) => {
         rowColors.forEach((color, c) => {
-          // A transparent source cell deletes whatever's on the active
-          // layer at the destination when the move is dropped (see
-          // pasteClipboardToGrid's TRANSPARENT handling) - leaving it
-          // fully see-through here would instead let the destination's
-          // *current* (pre-drop) active-layer content show through during
-          // the drag, which can visually differ from what the drop will
-          // actually produce. Rendering it against the non-active-layer
-          // composite at the destination previews the real post-drop
-          // result instead.
           const destRow = selection.startRow + r + moveDelta.dRow
           const destCol = selection.startCol + c + moveDelta.dCol
-          // A hidden active layer contributes nothing to the visible
-          // composite regardless of what it actually has painted there -
-          // same treatment as a transparent cell, whether or not this one
-          // has real content.
-          if (isActiveLayerHidden || color === 'transparent') {
-            floatingCtx.fillStyle = getBelowActiveLayerPixelColor(destRow, destCol)
-          } else {
-            // A layer above the active one keeps covering this cell after
-            // the drop regardless of what the active layer's own content
-            // becomes there - compositeLayers always lets it win. Without
-            // this check, the dragged color would render on top of
-            // everything during the preview even where it's about to be
-            // hidden again once dropped.
-            floatingCtx.fillStyle = getAboveActiveLayerPixelColor(destRow, destCol) || color
-          }
-          floatingCtx.fillRect(c, r, 1, 1)
+          // Previews the real post-drop result at the destination: the
+          // non-active layers there, with the dragged cell on top of them,
+          // and anything on a layer above the active one still covering it.
+          // A transparent source cell (or transparent half of a half-pixel)
+          // deletes whatever's on the active layer at the destination when
+          // the move is dropped (see pasteClipboardToGrid's TRANSPARENT
+          // handling), so the destination's *current* active-layer content
+          // must not show through it - `below` excludes the active layer for
+          // exactly that reason. A hidden active layer contributes nothing
+          // to the visible composite, same as a transparent cell.
+          const dragged = isActiveLayerHidden ? TRANSPARENT : color
+          const value = compositeCell(
+            compositeCell(getBelowActiveLayerPixelColor(destRow, destCol), dragged),
+            getAboveActiveLayerPixelColor(destRow, destCol)
+          )
+          drawCell(floatingCtx, value, c * scale, r * scale, scale)
         })
       })
     }
   }, [isSelectMode, selection, isMovingSelection, dragComposites, pixelSize, moveDelta])
+
+  const previewCellScale = selection
+    ? getPreviewCellScale(selection.endCol - selection.startCol + 1, selection.endRow - selection.startRow + 1)
+    : 1
 
   const renderSquare = (row: number, col: number) => {
     return (
@@ -897,8 +923,8 @@ export default function DrawingCanvas({
                 <canvas
                   ref={holeCanvasRef}
                   className={styles.selectionHole}
-                  width={selection.endCol - selection.startCol + 1}
-                  height={selection.endRow - selection.startRow + 1}
+                  width={(selection.endCol - selection.startCol + 1) * previewCellScale}
+                  height={(selection.endRow - selection.startRow + 1) * previewCellScale}
                   style={{
                     left: `${selection.startCol * pixelSize}px`,
                     top: `${selection.startRow * pixelSize}px`,
@@ -909,8 +935,8 @@ export default function DrawingCanvas({
                 <canvas
                   ref={floatingCanvasRef}
                   className={styles.selectionFloating}
-                  width={selection.endCol - selection.startCol + 1}
-                  height={selection.endRow - selection.startRow + 1}
+                  width={(selection.endCol - selection.startCol + 1) * previewCellScale}
+                  height={(selection.endRow - selection.startRow + 1) * previewCellScale}
                   style={{
                     left: `${(selection.startCol + moveDelta.dCol) * pixelSize}px`,
                     top: `${(selection.startRow + moveDelta.dRow) * pixelSize}px`,

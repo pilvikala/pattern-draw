@@ -582,3 +582,32 @@ describe('isDrawingDataShaped', () => {
     expect(isDrawingDataShaped({ foo: 1, bar: 2 })).toBe(false)
   })
 })
+
+describe('half-pixels across layers', () => {
+  const RED = '#ff0000'
+  const BLUE = '#0000ff'
+
+  it('composites a half-pixel over the layer beneath per half', () => {
+    const result = compositeLayers([
+      createLayer('bottom', { '0,0': RED }),
+      createLayer('top', { '0,0': `${BLUE},,,${BLUE}` }),
+    ])
+    expect(result['0,0']).toBe(`${BLUE},${RED},${RED},${BLUE}`)
+  })
+
+  it('merges a half-pixel down without wiping the other half', () => {
+    const bottom = createLayer('bottom', { '0,0': `,${RED},${RED},` })
+    const top = createLayer('top', { '0,0': `${BLUE},,,${BLUE}` })
+    const merged = mergeLayerDown([bottom, top], top.id)
+    expect(merged[0].grid['0,0']).toBe(`${BLUE},${RED},${RED},${BLUE}`)
+  })
+
+  it('normalizes half-pixel values from JSON (localStorage / save API)', () => {
+    const data = normalizeDrawingData({
+      canvasWidth: 4,
+      canvasHeight: 4,
+      layers: [{ id: 'a', name: 'A', visible: true, grid: { '0,0': 'ff0000,,,ff0000', '0,1': 'ff0000,zzz', '0,2': ',,,' } }],
+    })
+    expect(data.layers[0].grid).toEqual({ '0,0': `${RED},,,${RED}` })
+  })
+})

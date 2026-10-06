@@ -1,4 +1,5 @@
 import type { DrawingData, Layer, MatrixPattern } from './types'
+import { compositeCell, normalizeCellValue } from './cells'
 
 let layerIdCounter = 0
 export function createLayerId(): string {
@@ -18,13 +19,15 @@ export function createDefaultLayers(): Layer[] {
 // rendering the canvas or flattening a multi-layer drawing on export. A
 // layer's transparent (absent) cells let whatever is beneath show through;
 // hidden layers are skipped entirely, matching what's visually on screen.
+// The same holds within a cell: a half-pixel's empty half shows the layer
+// beneath (see compositeCell).
 export function compositeLayers(layers: Layer[]): { [key: string]: string } {
   const result: { [key: string]: string } = {}
   for (const layer of layers) {
     if (!layer.visible) continue
     for (const key in layer.grid) {
       const color = layer.grid[key]
-      if (color) result[key] = color
+      if (color) result[key] = compositeCell(result[key], color)
     }
   }
   return result
@@ -67,7 +70,7 @@ export function mergeLayerDown(layers: Layer[], sourceId: string): Layer[] {
   const mergedGrid = { ...target.grid }
   for (const key in source.grid) {
     const color = source.grid[key]
-    if (color) mergedGrid[key] = color
+    if (color) mergedGrid[key] = compositeCell(mergedGrid[key], color)
   }
 
   return layers
@@ -162,6 +165,10 @@ function isValidHexColor(value: unknown): value is string {
   return typeof value === 'string' && HEX_COLOR_PATTERN.test(value)
 }
 
+function normalizeHexColor(value: string): string | null {
+  return isValidHexColor(value) ? canonicalizeAcceptedColor(value) : null
+}
+
 // isValidHexColor accepts hex with or without a leading '#' (matching what
 // users can type into the raw color text input), but every consumer of a
 // stored color - DrawingCanvas's `backgroundColor` style, canvas
@@ -204,8 +211,10 @@ function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight:
     if (count >= maxEntries || scanned >= MAX_RAW_ENTRIES_TO_SCAN) break
     scanned++
     if (!Object.prototype.hasOwnProperty.call(record, key)) continue
-    const value = record[key]
-    if (!isValidHexColor(value)) continue
+    // A cell is either a single color or a half-pixel's four quarter
+    // colors (see lib/cells.ts); each color gets the same hex validation.
+    const value = normalizeCellValue(record[key], normalizeHexColor)
+    if (value === null) continue
     const match = GRID_KEY_PATTERN.exec(key)
     if (!match) continue
     const row = Number(match[1])
@@ -224,7 +233,7 @@ function normalizeLayerGrid(rawGrid: unknown, canvasWidth: number, canvasHeight:
     // aliases of an already-seen cell appear before the count is reached.
     const canonicalKey = `${row},${col}`
     if (!(canonicalKey in grid)) count++
-    grid[canonicalKey] = canonicalizeAcceptedColor(value)
+    grid[canonicalKey] = value
   }
   return grid
 }

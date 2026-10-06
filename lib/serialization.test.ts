@@ -504,3 +504,51 @@ describe('readBoundedRequestBody', () => {
     expect(result).toBe(text)
   })
 })
+
+describe('half-pixels in the v2 format', () => {
+  const RED = '#ff0000'
+  const BLUE = '#0000ff'
+  const halfPixelDrawing = () => drawing({
+    layers: [{
+      id: 'l1',
+      name: 'Layer 1',
+      visible: true,
+      grid: {
+        '0,0': RED,
+        '0,1': `${RED},,,${RED}`,
+        '1,1': `${RED},${BLUE},${BLUE},${RED}`,
+        '2,2': `,,${BLUE},${BLUE}`,
+      },
+    }],
+  })
+
+  it('roundtrips full and half pixels', () => {
+    const data = halfPixelDrawing()
+    const result = deserializeDrawing(serializeDrawing(data))
+    expect(result?.layers[0].grid).toEqual(data.layers[0].grid)
+  })
+
+  it('encodes half-pixels as four dot-separated palette indexes', () => {
+    const serialized = serializeDrawing(halfPixelDrawing())
+    // RED is used more often than BLUE, so it gets palette index 0.
+    expect(serialized).toContain('0,1:0...0')
+    expect(serialized).toContain('1,1:0.1.1.0')
+    expect(serialized).toContain('2,2:..1.1')
+  })
+
+  it('still reads a v2 string written before half-pixels existed', () => {
+    const legacy = 'v2|s|15|20|20|0|ff0000|ff0000,ff|Layer%201|1|0,0:0;1,1:1'
+    expect(deserializeDrawing(legacy)?.layers[0].grid).toEqual({ '0,0': RED, '1,1': BLUE })
+  })
+
+  it('drops half-pixel entries with unknown palette indexes', () => {
+    const corrupt = 'v2|s|15|20|20|0||ff0000|Layer%201|1|0,0:0;0,1:9...9;0,2:0.0;0,3:0...9'
+    expect(deserializeDrawing(corrupt)?.layers[0].grid).toEqual({ '0,0': RED, '0,3': `${RED},,,` })
+  })
+
+  it('roundtrips half-pixels through the share link encoding', async () => {
+    const data = halfPixelDrawing()
+    const result = await decodeDrawing(await encodeDrawing(data))
+    expect(result?.layers[0].grid).toEqual(data.layers[0].grid)
+  })
+})

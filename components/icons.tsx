@@ -1,3 +1,5 @@
+import type { PixelShape } from '@/lib/cells'
+
 interface IconProps {
   className?: string
 }
@@ -138,6 +140,41 @@ export function MirrorIcon({ className }: IconProps) {
       <path d="M12 2v20" strokeDasharray="3 2" />
       <path d="M9 6 3 18h6z" />
       <path d="M15 6l6 12h-6z" />
+    </svg>
+  )
+}
+
+// Triangle (or full square) drawn by the pencil for each pixel shape - the
+// outlined square is the cell, the filled part is what gets painted.
+const SHAPE_POINTS: Record<PixelShape, string> = {
+  full: '4,4 20,4 20,20 4,20',
+  topLeft: '4,4 20,4 4,20',
+  topRight: '4,4 20,4 20,20',
+  bottomRight: '20,4 20,20 4,20',
+  bottomLeft: '4,4 20,20 4,20',
+}
+
+export function PixelShapeIcon({ className, shape }: IconProps & { shape: PixelShape }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <polygon points={SHAPE_POINTS[shape]} fill="currentColor" />
+      <rect x="4" y="4" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  )
+}
+
+export function ChevronDownIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="m6 9 6 6 6-6" />
     </svg>
   )
 }
