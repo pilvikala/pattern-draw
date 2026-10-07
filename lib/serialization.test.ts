@@ -651,6 +651,11 @@ describe('freehand layers in the v2 format', () => {
     expect(result?.layers[0].strokes).toEqual([])
   })
 
+  it('drops a stroke with an empty numeric field instead of reading it as 0', () => {
+    const serialized = 'v2|s|15|20|20|0|0|ff0000|Sketch|1|~;0,,500,500,100,0;0,30,,500;0,30,500,500,,0;0,30,500,500,100,0'
+    expect(deserializeDrawing(serialized)?.layers[0].strokes).toEqual([{ color: '#ff0000', width: 0.3, points: [5, 5, 6, 5] }])
+  })
+
   it('clamps stroke coordinates onto the canvas when loading', () => {
     const serialized = 'v2|s|15|20|20|0|0|ff0000|Sketch|1|~;0,30,-500,99900,100,0'
     expect(deserializeDrawing(serialized)?.layers[0].strokes).toEqual([{ color: '#ff0000', width: 0.3, points: [0, 20, 0, 20] }])

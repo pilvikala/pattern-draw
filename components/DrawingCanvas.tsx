@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, memo } from 'react'
 import type { MatrixPattern, Tool, SelectionRect, Layer, Stroke } from '@/lib/types'
-import { normalizeRect } from '@/lib/selection'
+import { normalizeRect, copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
 import { compositeLayers } from '@/lib/layers'
 import { TRANSPARENT } from '@/lib/types'
 import { cellBackground, compositeCell, drawCell } from '@/lib/cells'
@@ -180,6 +180,12 @@ export default function DrawingCanvas({
   const activeLayer = layers[activeLayerIndex]
   const activeIsFreehand = activeLayer?.type === 'freehand'
   const isFreehandPointerMode = activeIsFreehand && (tool === 'draw' || tool === 'erase')
+  // The hole/floating canvases that preview a dragged selection only know
+  // about pixel layers, and sit above everything else - they'd paint over any
+  // freehand strokes in or under the selection. So whenever the drawing has an
+  // overlay (see splitRenderLayers), and for freehand layers themselves, the
+  // drag is previewed by rendering the layers as they will be once dropped.
+  const previewDragFromLayers = activeIsFreehand || splitRenderLayers(layers).overlay.length > 0
 
   const [isDrawing, setIsDrawing] = useState(false)
   const [isSelecting, setIsSelecting] = useState(false)
@@ -224,7 +230,7 @@ export default function DrawingCanvas({
 
   const getPixelColor = (row: number, col: number): string => {
     const key = getPixelKey(row, col)
-    return grid[key] || TRANSPARENT
+    return cellGrid[key] || TRANSPARENT
   }
 
   const getActiveLayerPixelColor = (row: number, col: number): string => {
@@ -313,11 +319,26 @@ export default function DrawingCanvas({
   // as it will be once dropped - the same strokes the drop will produce -
   // instead of the cell-based hole/floating previews pixel layers use.
   const displayLayers = useMemo(() => {
-    if (!isMovingSelection || !activeIsFreehand || !selection) return layers
+    if (!isMovingSelection || !previewDragFromLayers || !selection) return layers
     if (moveDelta.dRow === 0 && moveDelta.dCol === 0) return layers
-    const moved = moveStrokesInRect(activeLayer.strokes ?? [], selection, moveDelta.dRow, moveDelta.dCol, strokeBounds)
-    return layers.map((layer, i) => (i === activeLayerIndex ? { ...layer, strokes: moved } : layer))
-  }, [isMovingSelection, activeIsFreehand, selection, moveDelta, layers, activeLayer, activeLayerIndex, strokeBounds])
+    if (activeIsFreehand) {
+      const moved = moveStrokesInRect(activeLayer.strokes ?? [], selection, moveDelta.dRow, moveDelta.dCol, strokeBounds)
+      return layers.map((layer, i) => (i === activeLayerIndex ? { ...layer, strokes: moved } : layer))
+    }
+    // The same cell move the drop performs (see handleSelectionMoveEnd).
+    const clip = copySelectionCells(activeLayer.grid, selection)
+    const cleared = clearRectFromGrid(activeLayer.grid, selection)
+    const movedGrid = pasteClipboardToGrid(cleared, clip, selection.startRow + moveDelta.dRow, selection.startCol + moveDelta.dCol, canvasWidth, canvasHeight)
+    return layers.map((layer, i) => (i === activeLayerIndex ? { ...layer, grid: movedGrid } : layer))
+  }, [isMovingSelection, previewDragFromLayers, activeIsFreehand, selection, moveDelta, layers, activeLayer, activeLayerIndex, strokeBounds, canvasWidth, canvasHeight])
+
+  // The cells the grid shows. Normally the composite the parent computed; while
+  // a drag is previewed from layers, a pixel layer below the overlay moves
+  // with it, so the cells have to be recomposited from the preview layers.
+  const cellGrid = useMemo(
+    () => (displayLayers === layers ? grid : compositeLayers(splitRenderLayers(displayLayers).base)),
+    [displayLayers, layers, grid]
+  )
 
   const overlayLayers = useMemo(() => splitRenderLayers(displayLayers).overlay, [displayLayers])
   const hasOverlay = overlayLayers.length > 0
@@ -438,10 +459,10 @@ export default function DrawingCanvas({
     e.preventDefault()
     if (isSelectMode) {
       if (selection && isInsideSelection(row, col)) {
-        // A freehand layer previews the drag from its strokes (see
-        // displayLayers), so there is no cell snapshot to take.
+        // When the drag is previewed from the layers themselves (see
+        // displayLayers) there is no cell snapshot to take.
         const snapshot: string[][] = []
-        for (let r = selection.startRow; !activeIsFreehand && r <= selection.endRow; r++) {
+        for (let r = selection.startRow; !previewDragFromLayers && r <= selection.endRow; r++) {
           const rowColors: string[] = []
           for (let c = selection.startCol; c <= selection.endCol; c++) {
             rowColors.push(getActiveLayerPixelColor(r, c))
@@ -591,7 +612,7 @@ export default function DrawingCanvas({
         e.preventDefault()
         if (selection && isInsideSelection(cell.row, cell.col)) {
           const snapshot: string[][] = []
-          for (let r = selection.startRow; !activeIsFreehand && r <= selection.endRow; r++) {
+          for (let r = selection.startRow; !previewDragFromLayers && r <= selection.endRow; r++) {
             const rowColors: string[] = []
             for (let c = selection.startCol; c <= selection.endCol; c++) {
               rowColors.push(getActiveLayerPixelColor(r, c))
@@ -673,7 +694,7 @@ export default function DrawingCanvas({
         }
       }
     }
-  }, [isSingleClickMode, isSelectMode, isFreehandPointerMode, activeIsFreehand, freehandDown, cancelStroke, pattern, pixelSize, dimensions, handlePixelClick, getPointInCell, zoom, getCellFromPoint, selection, onSelectionChange, activeLayerGrid])
+  }, [isSingleClickMode, isSelectMode, isFreehandPointerMode, previewDragFromLayers, freehandDown, cancelStroke, pattern, pixelSize, dimensions, handlePixelClick, getPointInCell, zoom, getCellFromPoint, selection, onSelectionChange, activeLayerGrid])
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     // Handle pinch gesture
@@ -885,13 +906,13 @@ export default function DrawingCanvas({
   // (rather than just the cheap destination-cell lookup the paint effect
   // below needs) could block the UI on a large multi-layer drag.
   const dragComposites = useMemo(() => {
-    // A freehand layer is previewed from its strokes instead (displayLayers).
-    if (!isMovingSelection || activeIsFreehand) return null
+    // Previewed from the layers themselves instead (displayLayers).
+    if (!isMovingSelection || previewDragFromLayers) return null
     return {
       below: compositeLayers(layers.filter((_, i) => i !== activeLayerIndex)),
       above: compositeLayers(layers.slice(activeLayerIndex + 1)),
     }
-  }, [isMovingSelection, activeIsFreehand, layers, activeLayerIndex])
+  }, [isMovingSelection, previewDragFromLayers, layers, activeLayerIndex])
 
   // Paints the hole (layers below the active one, at the selection's
   // original position) and the floating preview (the active layer's
@@ -1134,12 +1155,12 @@ export default function DrawingCanvas({
               />
             )}
 
-            {isSelectMode && selection && (!isMovingSelection || activeIsFreehand) && (
+            {isSelectMode && selection && (!isMovingSelection || previewDragFromLayers) && (
               <div
                 className={styles.selectionMarquee}
                 style={{
-                  // On a freehand layer the marquee itself follows the drag
-                  // (there is no floating cell preview to carry it).
+                  // When the drag is previewed from the layers there is no
+                  // floating cell preview, so the marquee itself follows it.
                   left: `${(selection.startCol + (isMovingSelection ? moveDelta.dCol : 0)) * pixelSize}px`,
                   top: `${(selection.startRow + (isMovingSelection ? moveDelta.dRow : 0)) * pixelSize}px`,
                   width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
@@ -1148,7 +1169,7 @@ export default function DrawingCanvas({
               />
             )}
 
-            {isSelectMode && selection && isMovingSelection && !activeIsFreehand && movingSnapshotRef.current && (
+            {isSelectMode && selection && isMovingSelection && !previewDragFromLayers && movingSnapshotRef.current && (
               <>
                 {/* Renders the other (non-active) layers for this rect onto a
                     canvas - not one <div> per cell - so the hole left by the

@@ -443,6 +443,12 @@ function decodeStrokes(field: string, allColors: { [key: string]: string }): Str
     if (count < 4 || count % 2 !== 0) continue
     const color = allColors[fields[0]]
     if (!color) continue
+    // Number('') is 0, so an empty field would read as a real value; the
+    // writer never produces one (a zero offset is written "0"), so an entry
+    // with one is corrupt and dropped, like a malformed cell entry.
+    let hasEmptyField = false
+    for (let k = 1; k < count; k++) if (fields[k] === '') hasEmptyField = true
+    if (hasEmptyField) continue
     const width = Number(fields[1]) / 100
     let x = Number(fields[2])
     let y = Number(fields[3])
