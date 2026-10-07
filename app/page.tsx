@@ -100,6 +100,10 @@ function HomeContent() {
   const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isSavingCopy, setIsSavingCopy] = useState(false)
+  // Serialized snapshot of the last drawing persisted to the server (manual or
+  // auto save), used to skip autosaves when nothing changed.
+  const lastPersistedRef = useRef<string | null>(null)
+  const autosaveInFlightRef = useRef(false)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
   const [showNewDrawingModal, setShowNewDrawingModal] = useState(false)
 
@@ -319,6 +323,7 @@ function HomeContent() {
               // Already normalized server-side: the GET route reads it via
               // deserializeDrawing, which now always normalizes internally.
               applyLoadedDrawing(drawingData)
+              lastPersistedRef.current = JSON.stringify(normalizeDrawingData(drawingData))
               setCurrentDrawingId(drawingId)
             } else {
               loadedDrawingIdRef.current = null
@@ -865,6 +870,7 @@ function HomeContent() {
     setClipboard(null)
     // Reset currentDrawingId so future saves create a new drawing instead of updating
     setCurrentDrawingId(null)
+    lastPersistedRef.current = null
     // Clear the URL parameter if present
     if (searchParams.get('id')) {
       router.replace(window.location.pathname)
@@ -1047,6 +1053,44 @@ function HomeContent() {
     })
   }
 
+  // Auto-save the current drawing every minute while signed in. Skips when
+  // nothing changed since the last save, when a manual save is running, and
+  // for a blank never-saved canvas (avoids creating empty drawings).
+  const autosaveStateRef = useRef({ buildDrawingData, currentDrawingId, isSaving, isSavingCopy })
+  autosaveStateRef.current = { buildDrawingData, currentDrawingId, isSaving, isSavingCopy }
+  const userId = session?.user?.id
+  useEffect(() => {
+    if (!userId) return
+    const interval = setInterval(async () => {
+      const { buildDrawingData: build, currentDrawingId: id, isSaving: saving, isSavingCopy: savingCopy } = autosaveStateRef.current
+      if (saving || savingCopy || autosaveInFlightRef.current) return
+      const drawingData = build()
+      const snapshot = JSON.stringify(drawingData)
+      if (snapshot === lastPersistedRef.current) return
+      if (!id && lastPersistedRef.current === null && !drawingData.layers?.some(l => isFreehandLayer(l) ? (l.strokes?.length ?? 0) > 0 : Object.keys(l.grid).length > 0)) return
+      autosaveInFlightRef.current = true
+      try {
+        const response = await fetch(id ? `/api/drawings/${id}` : '/api/drawings', {
+          method: id ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ drawingData }),
+          credentials: 'include',
+        })
+        if (!response.ok) return // silent; retried on next tick
+        lastPersistedRef.current = snapshot
+        if (!id) {
+          const { drawing } = await response.json()
+          setCurrentDrawingId(drawing.id)
+        }
+      } catch (e) {
+        console.error('Autosave failed', e)
+      } finally {
+        autosaveInFlightRef.current = false
+      }
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [userId])
+
   const handleSave = async () => {
     if (!session?.user?.id) {
       showToast('Please sign in to save drawings', 'error')
@@ -1090,6 +1134,7 @@ function HomeContent() {
       }
 
       if (response.ok) {
+        lastPersistedRef.current = JSON.stringify(drawingData)
         if (currentDrawingId) {
           showToast('Drawing updated!', 'success')
         } else {
