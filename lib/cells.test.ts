@@ -9,6 +9,7 @@ import {
   cellBackground,
   normalizeCellValue,
   isSplitCell,
+  drawCell,
 } from './cells'
 
 const RED = '#ff0000'
@@ -144,5 +145,52 @@ describe('normalizeCellValue', () => {
     const value = normalizeCellValue(`${RED},${RED},${RED},${RED}`, normalizeColor)
     expect(value).toBe(RED)
     expect(isSplitCell(value!)).toBe(false)
+  })
+})
+
+describe('drawCell', () => {
+  // Records the shapes drawCell fills, each as its fill color plus either the
+  // rect or the polygon's points.
+  function recordingContext() {
+    const shapes: { color: string; rect?: number[]; points?: number[][] }[] = []
+    let path: number[][] = []
+    const ctx = {
+      fillStyle: '',
+      fillRect(x: number, y: number, w: number, h: number) { shapes.push({ color: this.fillStyle, rect: [x, y, w, h] }) },
+      beginPath() { path = [] },
+      moveTo(x: number, y: number) { path.push([x, y]) },
+      lineTo(x: number, y: number) { path.push([x, y]) },
+      closePath() {},
+      fill() { shapes.push({ color: this.fillStyle, points: path }) },
+    }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, shapes }
+  }
+
+  it('fills a full pixel as one rect', () => {
+    const { ctx, shapes } = recordingContext()
+    drawCell(ctx, RED, 0, 0, 10)
+    expect(shapes).toEqual([{ color: RED, rect: [0, 0, 10, 10] }])
+  })
+
+  it('draws a half-pixel as a single triangle, with no seam along its diagonal', () => {
+    const { ctx, shapes } = recordingContext()
+    drawCell(ctx, paintCell(undefined, RED, 'topLeft'), 0, 0, 10)
+    // Left + top quarters merged: center, bottom-left, top-left, top-right.
+    expect(shapes).toEqual([{ color: RED, points: [[5, 5], [0, 10], [0, 0], [10, 0]] }])
+  })
+
+  it('paints the whole cell first when two halves leave no transparent gap', () => {
+    const { ctx, shapes } = recordingContext()
+    drawCell(ctx, paintCell(paintCell(undefined, RED, 'topLeft'), BLUE, 'bottomRight'), 0, 0, 10)
+    expect(shapes).toHaveLength(2)
+    expect(shapes[0].rect).toEqual([0, 0, 10, 10])
+    expect(shapes.map((s) => s.color).sort()).toEqual([BLUE, RED].sort())
+  })
+
+  it('leaves transparent parts and empty cells untouched', () => {
+    const { ctx, shapes } = recordingContext()
+    drawCell(ctx, '', 0, 0, 10)
+    drawCell(ctx, `${RED},${RED}`, 0, 0, 10) // malformed - treated as empty
+    expect(shapes).toEqual([])
   })
 })

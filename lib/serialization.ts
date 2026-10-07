@@ -71,11 +71,14 @@ export const MAX_COMPACT_STRING_LENGTH = 10_000_000
 // normalizeDrawingData or any other bound ever runs - a request with a huge
 // body (regardless of what JSON shape it eventually parses to, or fails to)
 // costs that memory/CPU up front, unprotected by any bound downstream.
-// Generous relative to the post-normalization MAX_TOTAL_GRID_ENTRIES cap in
-// lib/layers.ts (2,000,000 cells, each needing well under 25 bytes of raw
-// JSON) so this never rejects a payload that would otherwise be accepted -
-// it only guards against a request many times larger than any drawing the
-// save routes would actually persist.
+// Generous relative to what the save routes can actually persist, so this
+// never rejects a payload that would otherwise be accepted - it only guards
+// against a request many times larger than any drawing they would store.
+// The binding limit is MAX_COMPACT_STRING_LENGTH on the serialized drawing:
+// the most JSON-heavy cell relative to its compact entry is a half-pixel
+// (e.g. `"1,1":"#ff0000,#0000ff,#0000ff,#ff0000",` - about 42 bytes of JSON
+// for a 12-character compact entry `1,1:0.1.1.0;`), so the largest drawing
+// that fits the compact limit is roughly 35MB of JSON, under this cap.
 export const MAX_REQUEST_BODY_BYTES = 50 * 1024 * 1024
 
 // Rejects an absurdly long encoded `?drawing=` value before doing any

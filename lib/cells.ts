@@ -48,14 +48,25 @@ export function isSplitCell(value: string | undefined): boolean {
   return !!value && value.includes(SPLIT_SEPARATOR)
 }
 
-export function cellQuarters(value: string | undefined): CellQuarters {
-  if (!value) return [TRANSPARENT, TRANSPARENT, TRANSPARENT, TRANSPARENT]
-  if (!isSplitCell(value)) return [value, value, value, value]
+function emptyQuarters(): CellQuarters {
+  return [TRANSPARENT, TRANSPARENT, TRANSPARENT, TRANSPARENT]
+}
+
+// The four quarters of a split value, or null when it doesn't have exactly
+// four parts. Bounded split: a crafted value with many separators never
+// materializes more than five parts.
+function parseSplit(value: string): CellQuarters | null {
   const parts = value.split(SPLIT_SEPARATOR, 5)
+  return parts.length === 4 ? (parts as CellQuarters) : null
+}
+
+// Always returns a fresh array, so callers may modify it in place.
+export function cellQuarters(value: string | undefined): CellQuarters {
+  if (!value) return emptyQuarters()
+  if (!isSplitCell(value)) return [value, value, value, value]
   // Malformed split values are treated as empty rather than guessed at -
   // normalizeCellValue drops them on load anyway.
-  if (parts.length !== 4) return [TRANSPARENT, TRANSPARENT, TRANSPARENT, TRANSPARENT]
-  return parts as CellQuarters
+  return parseSplit(value) ?? emptyQuarters()
 }
 
 // Collapses to the simplest equivalent value: a single color when all four
@@ -135,21 +146,44 @@ export function drawCell(ctx: CanvasRenderingContext2D, value: string | undefine
     return
   }
   const quarters = cellQuarters(value)
-  const cx = x + size / 2
-  const cy = y + size / 2
-  // Each quarter is the triangle between two adjacent corners and the
-  // center, in top/right/bottom/left order.
+  // Quarter i is the triangle between corners i and i + 1 and the center
+  // (top/right/bottom/left order). Neighboring quarters of the same color
+  // are drawn as one polygon: separately anti-aliased triangles would let
+  // the background bleed through as a faint line along their shared
+  // diagonal, e.g. through the middle of every half-pixel.
   const corners: [number, number][] = [[x, y], [x + size, y], [x + size, y + size], [x, y + size]]
+  // Start at a color change so no run of equal quarters wraps around the end.
+  // A valid split cell always has one; a malformed value parses as four
+  // empty quarters, which becomes a single run.
+  let start = 0
+  while (start < 4 && quarters[start] === quarters[(start + 3) % 4]) start++
+  if (start === 4) start = 0
+  const runs: { color: string; first: number; length: number }[] = []
   for (let i = 0; i < 4; i++) {
-    const color = quarters[i]
+    const q = (start + i) % 4
+    const last = runs[runs.length - 1]
+    if (last && last.color === quarters[q]) last.length++
+    else runs.push({ color: quarters[q], first: q, length: 1 })
+  }
+
+  // With no transparent part, paint the whole cell in one color first so the
+  // remaining runs land on it and there's no background to bleed through
+  // between two different colors either.
+  let drawn = runs
+  if (!quarters.includes(TRANSPARENT)) {
+    ctx.fillStyle = runs[0].color
+    ctx.fillRect(x, y, size, size)
+    drawn = runs.slice(1)
+  }
+  for (const { color, first, length } of drawn) {
     if (!color) continue
-    const [ax, ay] = corners[i]
-    const [bx, by] = corners[(i + 1) % 4]
     ctx.fillStyle = color
     ctx.beginPath()
-    ctx.moveTo(ax, ay)
-    ctx.lineTo(bx, by)
-    ctx.lineTo(cx, cy)
+    ctx.moveTo(x + size / 2, y + size / 2)
+    for (let k = 0; k <= length; k++) {
+      const [cx, cy] = corners[(first + k) % 4]
+      ctx.lineTo(cx, cy)
+    }
     ctx.closePath()
     ctx.fill()
   }
@@ -163,8 +197,8 @@ export function drawCell(ctx: CanvasRenderingContext2D, value: string | undefine
 export function normalizeCellValue(value: unknown, normalizeColor: (color: string) => string | null): string | null {
   if (typeof value !== 'string' || !value) return null
   if (!isSplitCell(value)) return normalizeColor(value)
-  const parts = value.split(SPLIT_SEPARATOR, 5)
-  if (parts.length !== 4) return null
+  const parts = parseSplit(value)
+  if (!parts) return null
   const quarters = parts.map((p) => (p ? normalizeColor(p) ?? TRANSPARENT : TRANSPARENT))
   return cellFromQuarters(quarters) || null
 }

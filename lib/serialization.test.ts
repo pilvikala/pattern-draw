@@ -546,6 +546,11 @@ describe('half-pixels in the v2 format', () => {
     expect(deserializeDrawing(corrupt)?.layers[0].grid).toEqual({ '0,0': RED, '0,3': `${RED},,,` })
   })
 
+  it('drops half-pixel entries with non-numeric indexes', () => {
+    const corrupt = 'v2|s|15|20|20|0||ff0000|Layer%201|1|0,0:0;0,1:a.b.c.d'
+    expect(deserializeDrawing(corrupt)?.layers[0].grid).toEqual({ '0,0': RED })
+  })
+
   it('roundtrips half-pixels through the share link encoding', async () => {
     const data = halfPixelDrawing()
     const result = await decodeDrawing(await encodeDrawing(data))

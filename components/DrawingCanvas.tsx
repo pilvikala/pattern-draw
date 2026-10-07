@@ -201,12 +201,14 @@ export default function DrawingCanvas({
   }, [onPixelFill, selectedColor])
 
   // Where (clientX, clientY) falls inside the cell at (row, col), as
-  // fractions of the cell's size, accounting for zoom and brick offsets.
+  // fractions of the cell's size, accounting for zoom, the grid's border and
+  // brick offsets. Shared by the mouse and touch paths.
   const getPointInCell = useCallback((clientX: number, clientY: number, row: number, col: number): { x: number; y: number } | undefined => {
-    if (!containerRef.current) return undefined
-    const rect = containerRef.current.getBoundingClientRect()
-    let x = (clientX - rect.left) / zoom
-    let y = (clientY - rect.top) / zoom
+    const container = containerRef.current
+    if (!container) return undefined
+    const rect = container.getBoundingClientRect()
+    let x = (clientX - rect.left) / zoom - container.clientLeft
+    let y = (clientY - rect.top) / zoom - container.clientTop
     if (pattern === 'bricks' && row % 2 === 1) x -= pixelSize / 2
     if (pattern === 'bricksVertical' && col % 2 === 1) y -= pixelSize / 2
     const clamp = (v: number) => Math.max(0, Math.min(1, v))
@@ -252,7 +254,7 @@ export default function DrawingCanvas({
     return { row, col }
   }, [pattern, pixelSize, dimensions, zoom])
 
-  const handleMouseDown = (e: React.MouseEvent, row: number, col: number, point?: { x: number; y: number }) => {
+  const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
     e.preventDefault()
     if (isSelectMode) {
       if (selection && isInsideSelection(row, col)) {
@@ -276,7 +278,9 @@ export default function DrawingCanvas({
       return
     }
     if (isSingleClickMode) {
-      handlePixelClick(row, col, point)
+      // Only the color picker and fill care where inside the cell the click
+      // landed (to tell the halves of a half-pixel apart).
+      handlePixelClick(row, col, getPointInCell(e.clientX, e.clientY, row, col))
       return
     }
     setIsDrawing(true)
@@ -291,12 +295,7 @@ export default function DrawingCanvas({
     const rowAttr = target.dataset.row
     const colAttr = target.dataset.col
     if (rowAttr === undefined || colAttr === undefined) return
-    const rect = target.getBoundingClientRect()
-    const point = {
-      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
-    }
-    handleMouseDown(e, Number(rowAttr), Number(colAttr), point)
+    handleMouseDown(e, Number(rowAttr), Number(colAttr))
   }
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
