@@ -104,6 +104,9 @@ function HomeContent() {
   // auto save), used to skip autosaves when nothing changed.
   const lastPersistedRef = useRef<string | null>(null)
   const autosaveInFlightRef = useRef(false)
+  // Bumped whenever the current drawing is replaced (new drawing, load) so a
+  // slow autosave response for the previous drawing is discarded, not applied.
+  const drawingGenerationRef = useRef(0)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
   const [showNewDrawingModal, setShowNewDrawingModal] = useState(false)
 
@@ -322,6 +325,7 @@ function HomeContent() {
             if (drawingData) {
               // Already normalized server-side: the GET route reads it via
               // deserializeDrawing, which now always normalizes internally.
+              drawingGenerationRef.current++
               applyLoadedDrawing(drawingData)
               lastPersistedRef.current = JSON.stringify(normalizeDrawingData(drawingData))
               setCurrentDrawingId(drawingId)
@@ -869,6 +873,7 @@ function HomeContent() {
     setSelection(null)
     setClipboard(null)
     // Reset currentDrawingId so future saves create a new drawing instead of updating
+    drawingGenerationRef.current++
     setCurrentDrawingId(null)
     lastPersistedRef.current = null
     // Clear the URL parameter if present
@@ -883,7 +888,9 @@ function HomeContent() {
 
   const handleNewDrawingCopy = () => {
     setShowNewDrawingModal(false)
+    drawingGenerationRef.current++
     setCurrentDrawingId(null)
+    lastPersistedRef.current = null
     if (searchParams.get('id')) {
       router.replace(window.location.pathname)
     }
@@ -1056,14 +1063,19 @@ function HomeContent() {
   // Auto-save the current drawing every minute while signed in. Skips when
   // nothing changed since the last save, when a manual save is running, and
   // for a blank never-saved canvas (avoids creating empty drawings).
-  const autosaveStateRef = useRef({ buildDrawingData, currentDrawingId, isSaving, isSavingCopy })
-  autosaveStateRef.current = { buildDrawingData, currentDrawingId, isSaving, isSavingCopy }
+  const autosaveStateRef = useRef({ buildDrawingData, currentDrawingId, isSaving, isSavingCopy, router })
+  autosaveStateRef.current = { buildDrawingData, currentDrawingId, isSaving, isSavingCopy, router }
   const userId = session?.user?.id
   useEffect(() => {
     if (!userId) return
     const interval = setInterval(async () => {
-      const { buildDrawingData: build, currentDrawingId: id, isSaving: saving, isSavingCopy: savingCopy } = autosaveStateRef.current
+      const { buildDrawingData: build, currentDrawingId: id, isSaving: saving, isSavingCopy: savingCopy, router: r } = autosaveStateRef.current
       if (saving || savingCopy || autosaveInFlightRef.current) return
+      // A ?id= drawing is still loading (or failed to): the canvas holds
+      // unrelated local content, so don't persist it as a new drawing.
+      const urlId = new URLSearchParams(window.location.search).get('id')
+      if (urlId && urlId !== id) return
+      const generation = drawingGenerationRef.current
       const drawingData = build()
       const snapshot = JSON.stringify(drawingData)
       if (snapshot === lastPersistedRef.current) return
@@ -1077,10 +1089,16 @@ function HomeContent() {
           credentials: 'include',
         })
         if (!response.ok) return // silent; retried on next tick
+        const created = id ? null : (await response.json()).drawing
+        // The user started a new drawing or loaded another one meanwhile.
+        if (generation !== drawingGenerationRef.current) return
         lastPersistedRef.current = snapshot
-        if (!id) {
-          const { drawing } = await response.json()
-          setCurrentDrawingId(drawing.id)
+        if (created) {
+          setCurrentDrawingId(created.id)
+          // Same as save-as-copy: put the id in the URL so a reload reopens
+          // this drawing instead of autosaving a duplicate.
+          loadedDrawingIdRef.current = created.id
+          r.replace(`${window.location.pathname}?id=${created.id}`)
         }
       } catch (e) {
         console.error('Autosave failed', e)
@@ -1095,6 +1113,11 @@ function HomeContent() {
     if (!session?.user?.id) {
       showToast('Please sign in to save drawings', 'error')
       router.push('/auth/signin')
+      return
+    }
+
+    if (autosaveInFlightRef.current) {
+      showToast('Autosave in progress, please try again in a moment', 'error')
       return
     }
 
