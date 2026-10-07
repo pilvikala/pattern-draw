@@ -4,6 +4,15 @@
   gap: 0.75rem;
 }
 
+.addButtons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.addButtons .addButton {
+  flex: 1;
+}
+
 .addButton {
   padding: 0.6rem 1rem;
   background: #0070f3;
@@ -67,6 +76,18 @@
 
 .visibilityToggle:hover {
   color: #0070f3;
+}
+
+.typeIcon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: #0070f3;
+}
+
+.typeIconSvg {
+  width: 16px;
+  height: 16px;
 }
 
 .name {

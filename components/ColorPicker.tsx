@@ -3,6 +3,7 @@
 import { useRef } from 'react'
 import { EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
 import PencilToolButton from './PencilToolButton'
+import type { FreehandPenSettings } from './PencilToolButton'
 import type { PixelShape } from '@/lib/cells'
 import styles from './ColorPicker.module.css'
 
@@ -14,12 +15,16 @@ interface ColorPickerProps {
   onDrawModeSelect: () => void
   pixelShape: PixelShape
   onPixelShapeChange: (shape: PixelShape) => void
+  // Set while a freehand layer is active (see PencilToolButton).
+  freehandPen?: FreehandPenSettings
   isEraseMode: boolean
   onEraseModeToggle: (enabled: boolean) => void
   isColorPickerMode: boolean
   onColorPickerModeToggle: (enabled: boolean) => void
   isFillMode: boolean
   onFillModeToggle: (enabled: boolean) => void
+  // Fill floods cells, so it can't be used on a freehand layer.
+  fillDisabled?: boolean
   isSelectMode: boolean
   onSelectModeToggle: (enabled: boolean) => void
   canCopy: boolean
@@ -38,12 +43,14 @@ export default function ColorPicker({
   onDrawModeSelect,
   pixelShape,
   onPixelShapeChange,
+  freehandPen,
   isEraseMode,
   onEraseModeToggle,
   isColorPickerMode,
   onColorPickerModeToggle,
   isFillMode,
   onFillModeToggle,
+  fillDisabled,
   isSelectMode,
   onSelectModeToggle,
   canCopy,
@@ -98,6 +105,7 @@ export default function ColorPicker({
           onDrawModeSelect={onDrawModeSelect}
           pixelShape={pixelShape}
           onPixelShapeChange={onPixelShapeChange}
+          freehandPen={freehandPen}
           buttonClassName={styles.toolButton}
           activeClassName={styles.active}
           iconClassName={styles.toolIcon}
@@ -113,8 +121,13 @@ export default function ColorPicker({
         </button>
         <button
           onClick={() => onFillModeToggle(!isFillMode)}
+          disabled={fillDisabled}
           className={`${styles.toolButton} ${isFillMode ? styles.active : ''}`}
-          title={isFillMode ? 'Fill tool active (click canvas to fill) (F)' : 'Fill tool (F)'}
+          title={
+            fillDisabled
+              ? "Fill isn't available on freehand layers"
+              : isFillMode ? 'Fill tool active (click canvas to fill) (F)' : 'Fill tool (F)'
+          }
           aria-label="Fill tool"
           aria-pressed={isFillMode}
         >

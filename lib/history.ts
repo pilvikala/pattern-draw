@@ -1,4 +1,5 @@
 import type { HistoryEntry } from './types'
+import { countStrokePoints } from './strokes'
 
 // Bounds the undo stack's total memory footprint (roughly this many grid
 // cells, summed across all retained snapshots and all layers) instead of a
@@ -30,6 +31,8 @@ export function historyEntryCellCost(entry: HistoryEntry): number {
   let cost = entry.layers.length
   for (const layer of entry.layers) {
     cost += Object.keys(layer.grid).length
+    // A freehand layer's strokes are what it costs, in place of a grid.
+    if (layer.strokes) cost += countStrokePoints(layer.strokes)
   }
   return Math.max(1, cost)
 }

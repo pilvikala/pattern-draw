@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
+  canMergeLayerDown,
   compositeLayers,
+  createFreehandLayer,
   createLayer,
   migrateGridToLayers,
   normalizeDrawingData,
@@ -11,6 +13,9 @@ import {
   MAX_LAYER_NAME_LENGTH,
 } from './layers'
 import type { Layer } from './types'
+import { historyEntryCellCost } from './history'
+import { splitRenderLayers } from './freehandRender'
+import { MAX_POINTS_PER_STROKE, MAX_STROKES_PER_LAYER } from './strokes'
 
 describe('compositeLayers', () => {
   it('overlays layers bottom to top, top layer winning on overlap', () => {
@@ -609,5 +614,116 @@ describe('half-pixels across layers', () => {
       layers: [{ id: 'a', name: 'A', visible: true, grid: { '0,0': 'ff0000,,,ff0000', '0,1': 'ff0000,zzz', '0,2': ',,,' } }],
     })
     expect(data.layers[0].grid).toEqual({ '0,0': `${RED},,,${RED}` })
+  })
+})
+
+describe('freehand layers', () => {
+  const stroke = (color = '#ff0000', points = [1, 1, 2, 2]) => ({ color, width: 0.3, points })
+  const raw = (layers: unknown[], extra: Record<string, unknown> = {}) =>
+    normalizeDrawingData({ pattern: 'squares', pixelSize: 15, canvasWidth: 20, canvasHeight: 20, colors: {}, layers, activeLayerIndex: 0, ...extra })
+
+  it('are not part of the flattened grid', () => {
+    const layers: Layer[] = [createLayer('Pixels', { '0,0': '#ff0000' }), createFreehandLayer('Pen', [stroke()])]
+    expect(compositeLayers(layers)).toEqual({ '0,0': '#ff0000' })
+  })
+
+  it('normalize keeps valid strokes and drops invalid ones', () => {
+    const result = raw([{
+      id: 'f', name: 'Pen', visible: true, type: 'freehand', grid: { '0,0': '#ff0000' },
+      strokes: [
+        stroke(),
+        { color: 'red', width: 0.3, points: [1, 1, 2, 2] },
+        { color: '#00ff00', width: 'thick', points: [1, 1] },
+        { color: '#00ff00', width: 0.3, points: [1, NaN, 2, 2] },
+        { color: '#00ff00', width: 0.3, points: [] },
+        { color: '#00ff00', width: 0.3, points: 'nope' },
+        null,
+        42,
+      ],
+    }])
+    expect(result.layers[0].type).toBe('freehand')
+    // A freehand layer never carries cells, whatever the payload claims.
+    expect(result.layers[0].grid).toEqual({})
+    expect(result.layers[0].strokes).toEqual([stroke()])
+  })
+
+  it('normalize quantizes, clamps and canonicalizes strokes', () => {
+    const result = raw([{
+      id: 'f', name: 'Pen', visible: true, type: 'freehand',
+      strokes: [{ color: 'ff0000', width: 99, points: [1.23456, -4, 25, 3.001, 7] }],
+    }])
+    // 'ff0000' gains its '#', width is capped, points are clamped to the 20x20 canvas and an odd trailing value is ignored.
+    expect(result.layers[0].strokes).toEqual([{ color: '#ff0000', width: 5, points: [1.23, 0, 20, 3] }])
+  })
+
+  it('normalize allows the half-cell overhang of brick patterns only', () => {
+    const layer = { id: 'f', name: 'Pen', visible: true, type: 'freehand', strokes: [{ color: '#ff0000', width: 0.3, points: [30, 30] }] }
+    expect(raw([layer], { pattern: 'bricks' }).layers[0].strokes?.[0].points).toEqual([20.5, 20])
+    expect(raw([layer], { pattern: 'bricksVertical' }).layers[0].strokes?.[0].points).toEqual([20, 20.5])
+  })
+
+  it('normalize treats an unknown layer type as a pixel layer', () => {
+    const result = raw([{ id: 'x', name: 'Odd', visible: true, type: 'hologram', grid: { '0,0': '#ff0000' }, strokes: [stroke()] }])
+    expect(result.layers[0]).toEqual({ id: 'x', name: 'Odd', visible: true, grid: { '0,0': '#ff0000' } })
+  })
+
+  it('normalize bounds strokes per layer and points per stroke', () => {
+    const many = Array.from({ length: MAX_STROKES_PER_LAYER + 50 }, () => stroke())
+    const long = { color: '#ff0000', width: 0.3, points: Array.from({ length: (MAX_POINTS_PER_STROKE + 10) * 2 }, () => 1) }
+    const result = raw([
+      { id: 'a', name: 'A', visible: true, type: 'freehand', strokes: many },
+      { id: 'b', name: 'B', visible: true, type: 'freehand', strokes: [long] },
+    ])
+    expect(result.layers[0].strokes).toHaveLength(MAX_STROKES_PER_LAYER)
+    expect(result.layers[1].strokes?.[0].points).toHaveLength(MAX_POINTS_PER_STROKE * 2)
+  })
+
+  it('counts stroke points toward the aggregate size preflight', () => {
+    const data = raw([
+      { id: 'a', name: 'A', visible: true, grid: { '0,0': '#ff0000' } },
+      { id: 'b', name: 'B', visible: true, type: 'freehand', strokes: [stroke('#ff0000', [1, 1, 2, 2, 3, 3])] },
+    ])
+    expect(totalGridEntryCount(data)).toBe(1 + 3)
+  })
+
+  it('merges freehand into freehand, source strokes on top', () => {
+    const layers = [createFreehandLayer('Below', [stroke('#111111')]), createFreehandLayer('Above', [stroke('#222222')])]
+    const merged = mergeLayerDown(layers, layers[1].id)
+    expect(merged).toHaveLength(1)
+    expect(merged[0].type).toBe('freehand')
+    expect(merged[0].strokes?.map((s) => s.color)).toEqual(['#111111', '#222222'])
+  })
+
+  it('refuses to merge across layer kinds', () => {
+    const pixel = createLayer('Pixels', { '0,0': '#ff0000' })
+    const pen = createFreehandLayer('Pen', [stroke()])
+    expect(canMergeLayerDown([pixel, pen], pen.id)).toBe(false)
+    expect(mergeLayerDown([pixel, pen], pen.id)).toEqual([pixel, pen])
+    expect(canMergeLayerDown([pen, pixel], pixel.id)).toBe(false)
+    expect(canMergeLayerDown([pixel, createLayer('Other')], 'nope')).toBe(false)
+  })
+})
+
+describe('history cost of freehand layers', () => {
+  it('counts stroke points, so a heavy sketch cannot hide in the undo stack', () => {
+    const pen = createFreehandLayer('Pen', [{ color: '#ff0000', width: 0.3, points: [1, 1, 2, 2, 3, 3, 4, 4] }])
+    expect(historyEntryCellCost({ layers: [pen], activeLayerIndex: 0 })).toBe(1 + 4)
+  })
+})
+
+describe('splitRenderLayers', () => {
+  const stroke = { color: '#ff0000', width: 0.3, points: [1, 1, 2, 2] }
+
+  it('leaves everything in the grid when there is no visible freehand layer', () => {
+    const hiddenPen = { ...createFreehandLayer('Pen', [stroke]), visible: false }
+    const layers = [createLayer('A'), hiddenPen, createLayer('B')]
+    expect(splitRenderLayers(layers)).toEqual({ base: layers, overlay: [] })
+  })
+
+  it('draws the lowest visible freehand layer and everything above it over the grid', () => {
+    const layers = [createLayer('A'), createLayer('B'), createFreehandLayer('Pen', [stroke]), createLayer('C'), createFreehandLayer('Pen 2')]
+    const { base, overlay } = splitRenderLayers(layers)
+    expect(base.map((l) => l.name)).toEqual(['A', 'B'])
+    expect(overlay.map((l) => l.name)).toEqual(['Pen', 'C', 'Pen 2'])
   })
 })

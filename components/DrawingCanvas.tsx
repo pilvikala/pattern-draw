@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
-import type { MatrixPattern, Tool, SelectionRect, Layer } from '@/lib/types'
-import { normalizeRect } from '@/lib/selection'
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, memo } from 'react'
+import type { MatrixPattern, Tool, SelectionRect, Layer, Stroke } from '@/lib/types'
+import { normalizeRect, copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
 import { compositeLayers } from '@/lib/layers'
 import { TRANSPARENT } from '@/lib/types'
 import { cellBackground, compositeCell, drawCell } from '@/lib/cells'
+import { drawOverlayLayers, splitRenderLayers } from '@/lib/freehandRender'
+import { canvasBounds, moveStrokesInRect, simplifyPoints, quantize, MAX_POINTS_PER_STROKE } from '@/lib/strokes'
 import styles from './DrawingCanvas.module.css'
 
 interface PixelProps {
@@ -48,6 +50,23 @@ const LABEL_STEPS = [1, 2, 5, 10, 20, 50]
 // full 500x500 selection stays a small canvas (see the paint effect below).
 const MAX_PREVIEW_CANVAS_SIDE = 2048
 const MAX_PREVIEW_CELL_SCALE = 32
+
+// The freehand overlay canvas is drawn at the display's pixel density (and
+// the current zoom) so strokes stay sharp, but its backing store is capped for
+// the same reason as the selection canvases above: a 500x500 canvas at 50px
+// per cell would otherwise ask for a 25,000x25,000px bitmap.
+const MAX_OVERLAY_SIDE = 4096
+const MAX_OVERLAY_AREA = 16_000_000
+
+// A pointer reports far more positions than a line needs; samples closer
+// than this (in cells) to the previous one are skipped while drawing, and the
+// finished stroke is thinned further with SIMPLIFY_EPSILON (also in cells).
+const MIN_POINT_SPACING = 0.05
+const SIMPLIFY_EPSILON = 0.03
+
+// Radius, in cells, of the eraser on a freehand layer: any stroke it touches
+// is removed.
+const ERASER_RADIUS = 0.5
 function getPreviewCellScale(width: number, height: number): number {
   return Math.max(1, Math.min(MAX_PREVIEW_CELL_SCALE, Math.floor(MAX_PREVIEW_CANVAS_SIDE / Math.max(width, height))))
 }
@@ -97,7 +116,12 @@ interface DrawingCanvasProps {
   canvasWidth: number
   canvasHeight: number
   selectedColor: string
-  // Composited view of all visible layers - what's actually rendered.
+  // Thickness, in cells, of the line the pencil draws on a freehand layer.
+  strokeWidth: number
+  // Composited view of the layers the grid itself shows - what's actually
+  // rendered as cells. Layers from the lowest visible freehand layer upward
+  // are left out and drawn on the overlay canvas instead (see
+  // splitRenderLayers).
   grid: { [key: string]: string }
   // Just the active layer's cells - used for the moving-selection preview so
   // it shows only what's actually being relocated, not layers beneath it.
@@ -119,6 +143,11 @@ interface DrawingCanvasProps {
   selection: SelectionRect | null
   onSelectionChange: (rect: SelectionRect | null) => void
   onSelectionMoveEnd: (deltaRow: number, deltaCol: number) => void
+  // A finished pencil stroke on the active freehand layer.
+  onStrokeCommit: (stroke: Stroke) => void
+  // The eraser passed over (x, y) - in cells from the canvas's top-left
+  // corner - on the active freehand layer, with a reach of `radius` cells.
+  onStrokeErase: (x: number, y: number, radius: number) => void
 }
 
 export default function DrawingCanvas({
@@ -127,6 +156,7 @@ export default function DrawingCanvas({
   canvasWidth,
   canvasHeight,
   selectedColor,
+  strokeWidth,
   grid,
   activeLayerGrid,
   layers,
@@ -136,6 +166,8 @@ export default function DrawingCanvas({
   selection,
   onSelectionChange,
   onSelectionMoveEnd,
+  onStrokeCommit,
+  onStrokeErase,
 }: DrawingCanvasProps) {
   const isColorPickerMode = tool === 'colorPicker'
   const isFillMode = tool === 'fill'
@@ -143,6 +175,17 @@ export default function DrawingCanvas({
   // Fill and color-picker act on a single click rather than drag-painting;
   // select uses its own drag semantics (marquee / move), handled separately.
   const isSingleClickMode = isColorPickerMode || isFillMode
+  // On a freehand layer the pencil and eraser work on the pointer's exact
+  // position (a smooth line / a reach in cells) instead of on whole cells.
+  const activeLayer = layers[activeLayerIndex]
+  const activeIsFreehand = activeLayer?.type === 'freehand'
+  const isFreehandPointerMode = activeIsFreehand && (tool === 'draw' || tool === 'erase')
+  // The hole/floating canvases that preview a dragged selection only know
+  // about pixel layers, and sit above everything else - they'd paint over any
+  // freehand strokes in or under the selection. So whenever the drawing has an
+  // overlay (see splitRenderLayers), and for freehand layers themselves, the
+  // drag is previewed by rendering the layers as they will be once dropped.
+  const previewDragFromLayers = activeIsFreehand || splitRenderLayers(layers).overlay.length > 0
 
   const [isDrawing, setIsDrawing] = useState(false)
   const [isSelecting, setIsSelecting] = useState(false)
@@ -157,6 +200,14 @@ export default function DrawingCanvas({
   // otherwise create 250,000 DOM nodes per overlay on every drag frame.
   const holeCanvasRef = useRef<HTMLCanvasElement>(null)
   const floatingCanvasRef = useRef<HTMLCanvasElement>(null)
+  // Freehand layers (and whatever is stacked above them) are painted here, on
+  // top of the grid - see paintOverlay below.
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
+  // The pencil stroke currently being drawn. A ref, not state: it grows on
+  // every pointer move, and re-rendering the whole grid for each point would
+  // make drawing sluggish on large canvases - the overlay is repainted
+  // directly instead.
+  const liveStrokeRef = useRef<{ layerId: string; stroke: Stroke } | null>(null)
   const [zoom, setZoom] = useState(1.0)
   const containerRef = useRef<HTMLDivElement>(null)
   const zoomContainerRef = useRef<HTMLDivElement>(null)
@@ -164,7 +215,7 @@ export default function DrawingCanvas({
   const pinchStartZoomRef = useRef<number>(1.0)
   const isPinchingRef = useRef(false)
   const drawStartTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const pendingDrawRef = useRef<{ row: number; col: number } | null>(null)
+  const pendingDrawRef = useRef<{ row: number; col: number; clientX: number; clientY: number } | null>(null)
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null)
   const isScrollingRef = useRef(false)
 
@@ -179,7 +230,7 @@ export default function DrawingCanvas({
 
   const getPixelColor = (row: number, col: number): string => {
     const key = getPixelKey(row, col)
-    return grid[key] || TRANSPARENT
+    return cellGrid[key] || TRANSPARENT
   }
 
   const getActiveLayerPixelColor = (row: number, col: number): string => {
@@ -260,12 +311,158 @@ export default function DrawingCanvas({
     return { row, col }
   }, [pattern, pixelSize, dimensions, zoom])
 
+  // --- Freehand layers ---
+
+  const strokeBounds = useMemo(() => canvasBounds(pattern, canvasWidth, canvasHeight), [pattern, canvasWidth, canvasHeight])
+
+  // While a selection is being dragged on a freehand layer, the layer is shown
+  // as it will be once dropped - the same strokes the drop will produce -
+  // instead of the cell-based hole/floating previews pixel layers use.
+  const displayLayers = useMemo(() => {
+    if (!isMovingSelection || !previewDragFromLayers || !selection) return layers
+    if (moveDelta.dRow === 0 && moveDelta.dCol === 0) return layers
+    if (activeIsFreehand) {
+      const moved = moveStrokesInRect(activeLayer.strokes ?? [], selection, moveDelta.dRow, moveDelta.dCol, strokeBounds)
+      return layers.map((layer, i) => (i === activeLayerIndex ? { ...layer, strokes: moved } : layer))
+    }
+    // The same cell move the drop performs (see handleSelectionMoveEnd).
+    const clip = copySelectionCells(activeLayer.grid, selection)
+    const cleared = clearRectFromGrid(activeLayer.grid, selection)
+    const movedGrid = pasteClipboardToGrid(cleared, clip, selection.startRow + moveDelta.dRow, selection.startCol + moveDelta.dCol, canvasWidth, canvasHeight)
+    return layers.map((layer, i) => (i === activeLayerIndex ? { ...layer, grid: movedGrid } : layer))
+  }, [isMovingSelection, previewDragFromLayers, activeIsFreehand, selection, moveDelta, layers, activeLayer, activeLayerIndex, strokeBounds, canvasWidth, canvasHeight])
+
+  // The cells the grid shows. Normally the composite the parent computed; while
+  // a drag is previewed from layers, a pixel layer below the overlay moves
+  // with it, so the cells have to be recomposited from the preview layers.
+  const cellGrid = useMemo(
+    () => (displayLayers === layers ? grid : compositeLayers(splitRenderLayers(displayLayers).base)),
+    [displayLayers, layers, grid]
+  )
+
+  const overlayLayers = useMemo(() => splitRenderLayers(displayLayers).overlay, [displayLayers])
+  const hasOverlay = overlayLayers.length > 0
+  const overlayWidth = (dimensions.cols + (pattern === 'bricks' ? 0.5 : 0)) * pixelSize
+  const overlayHeight = (dimensions.rows + (pattern === 'bricksVertical' ? 0.5 : 0)) * pixelSize
+
+  // Repaints the whole overlay: every layer from the lowest visible freehand
+  // layer up, plus the stroke in progress. Cheap enough to redo per pointer
+  // move at the sizes freehand drawing is used at.
+  const paintOverlay = useCallback(() => {
+    const canvas = overlayCanvasRef.current
+    if (!canvas) return
+    const density = (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1) * Math.max(1, zoom)
+    const cap = Math.min(MAX_OVERLAY_SIDE / Math.max(overlayWidth, overlayHeight), Math.sqrt(MAX_OVERLAY_AREA / (overlayWidth * overlayHeight)))
+    const ratio = Math.min(density, cap)
+    const width = Math.max(1, Math.round(overlayWidth * ratio))
+    const height = Math.max(1, Math.round(overlayHeight * ratio))
+    // Resizing resets the bitmap, so only do it when the size really changed.
+    if (canvas.width !== width) canvas.width = width
+    if (canvas.height !== height) canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.clearRect(0, 0, width, height)
+    // One unit = one grid cell from here on.
+    ctx.setTransform((width / overlayWidth) * pixelSize, 0, 0, (height / overlayHeight) * pixelSize, 0, 0)
+    drawOverlayLayers(ctx, overlayLayers, { pattern, pixelSize }, liveStrokeRef.current)
+  }, [overlayLayers, overlayWidth, overlayHeight, pattern, pixelSize, zoom])
+
+  // Layout effect so a stroke that was just committed is painted from its
+  // layer in the same frame its live copy is discarded - no flicker.
+  useLayoutEffect(() => {
+    paintOverlay()
+  }, [paintOverlay, hasOverlay])
+
+  // Where (clientX, clientY) falls on the canvas, in cells from its top-left
+  // corner, clamped onto the canvas. Unlike getCellFromPoint this is the
+  // exact position, with no snapping to a cell.
+  const getCanvasPoint = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
+    const container = containerRef.current
+    if (!container) return null
+    const rect = container.getBoundingClientRect()
+    const x = ((clientX - rect.left) / zoom - container.clientLeft) / pixelSize
+    const y = ((clientY - rect.top) / zoom - container.clientTop) / pixelSize
+    return {
+      x: Math.max(strokeBounds.x0, Math.min(strokeBounds.x1, x)),
+      y: Math.max(strokeBounds.y0, Math.min(strokeBounds.y1, y)),
+    }
+  }, [zoom, pixelSize, strokeBounds])
+
+  // Ends the stroke in progress, handing the (thinned) result to the parent.
+  // Reads only refs, so every pointer handler - including the touch ones that
+  // are re-bound as props change - can call it safely.
+  const onStrokeCommitRef = useRef(onStrokeCommit)
+  useEffect(() => {
+    onStrokeCommitRef.current = onStrokeCommit
+  }, [onStrokeCommit])
+
+  const finishStroke = useCallback(() => {
+    const live = liveStrokeRef.current
+    if (!live) return
+    liveStrokeRef.current = null
+    const points = simplifyPoints(live.stroke.points, SIMPLIFY_EPSILON).map(quantize)
+    onStrokeCommitRef.current({ ...live.stroke, points })
+  }, [])
+
+  const cancelStroke = useCallback(() => {
+    if (!liveStrokeRef.current) return
+    liveStrokeRef.current = null
+    paintOverlay()
+  }, [paintOverlay])
+
+  const beginStroke = useCallback((clientX: number, clientY: number) => {
+    const point = getCanvasPoint(clientX, clientY)
+    if (!point || !activeLayer) return
+    liveStrokeRef.current = {
+      layerId: activeLayer.id,
+      stroke: { color: selectedColor, width: strokeWidth, points: [point.x, point.y] },
+    }
+    paintOverlay()
+  }, [getCanvasPoint, activeLayer, selectedColor, strokeWidth, paintOverlay])
+
+  const extendStroke = useCallback((clientX: number, clientY: number) => {
+    const live = liveStrokeRef.current
+    const point = getCanvasPoint(clientX, clientY)
+    if (!live || !point) return
+    const points = live.stroke.points
+    if (Math.hypot(point.x - points[points.length - 2], point.y - points[points.length - 1]) < MIN_POINT_SPACING) return
+    points.push(point.x, point.y)
+    if (points.length / 2 >= MAX_POINTS_PER_STROKE) {
+      // A stroke can't grow without bound: close this one and carry on from
+      // where it ended, which looks like one continuous line.
+      const { color, width } = live.stroke
+      const layerId = live.layerId
+      finishStroke()
+      liveStrokeRef.current = { layerId, stroke: { color, width, points: [point.x, point.y] } }
+    }
+    paintOverlay()
+  }, [getCanvasPoint, finishStroke, paintOverlay])
+
+  const eraseAt = useCallback((clientX: number, clientY: number) => {
+    const point = getCanvasPoint(clientX, clientY)
+    if (point) onStrokeErase(point.x, point.y, ERASER_RADIUS)
+  }, [getCanvasPoint, onStrokeErase])
+
+  // Starts / continues the pencil or eraser at a pointer position.
+  const freehandDown = useCallback((clientX: number, clientY: number) => {
+    if (tool === 'draw') beginStroke(clientX, clientY)
+    else eraseAt(clientX, clientY)
+  }, [tool, beginStroke, eraseAt])
+
+  const freehandMove = useCallback((clientX: number, clientY: number) => {
+    if (tool === 'draw') extendStroke(clientX, clientY)
+    else eraseAt(clientX, clientY)
+  }, [tool, extendStroke, eraseAt])
+
   const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
     e.preventDefault()
     if (isSelectMode) {
       if (selection && isInsideSelection(row, col)) {
+        // When the drag is previewed from the layers themselves (see
+        // displayLayers) there is no cell snapshot to take.
         const snapshot: string[][] = []
-        for (let r = selection.startRow; r <= selection.endRow; r++) {
+        for (let r = selection.startRow; !previewDragFromLayers && r <= selection.endRow; r++) {
           const rowColors: string[] = []
           for (let c = selection.startCol; c <= selection.endCol; c++) {
             rowColors.push(getActiveLayerPixelColor(r, c))
@@ -290,6 +487,10 @@ export default function DrawingCanvas({
       return
     }
     setIsDrawing(true)
+    if (isFreehandPointerMode) {
+      freehandDown(e.clientX, e.clientY)
+      return
+    }
     handlePixelClick(row, col)
   }
 
@@ -324,6 +525,11 @@ export default function DrawingCanvas({
 
     if (!isDrawing || !containerRef.current || isSingleClickMode) return
 
+    if (isFreehandPointerMode) {
+      freehandMove(e.clientX, e.clientY)
+      return
+    }
+
     const cell = getCellFromPoint(e.clientX, e.clientY)
     if (cell) {
       handlePixelClick(cell.row, cell.col)
@@ -349,6 +555,7 @@ export default function DrawingCanvas({
       finishSelectInteraction()
       return
     }
+    finishStroke()
     setIsDrawing(false)
   }
 
@@ -357,6 +564,7 @@ export default function DrawingCanvas({
       finishSelectInteraction()
       return
     }
+    finishStroke()
     setIsDrawing(false)
   }
 
@@ -372,6 +580,9 @@ export default function DrawingCanvas({
     if (e.touches.length === 2) {
       e.preventDefault()
       isPinchingRef.current = true
+      // A second finger means a pinch, not a line: drop the stroke in
+      // progress rather than committing the stray segment it drew so far.
+      cancelStroke()
       setIsDrawing(false)
 
       const touch1 = e.touches[0]
@@ -401,7 +612,7 @@ export default function DrawingCanvas({
         e.preventDefault()
         if (selection && isInsideSelection(cell.row, cell.col)) {
           const snapshot: string[][] = []
-          for (let r = selection.startRow; r <= selection.endRow; r++) {
+          for (let r = selection.startRow; !previewDragFromLayers && r <= selection.endRow; r++) {
             const rowColors: string[] = []
             for (let c = selection.startCol; c <= selection.endCol; c++) {
               rowColors.push(getActiveLayerPixelColor(r, c))
@@ -466,12 +677,16 @@ export default function DrawingCanvas({
         } else {
           // Drawing mode - delay start to detect if second finger is coming or if scrolling
           // Don't preventDefault immediately - let the scroll container handle scrolling
-          pendingDrawRef.current = { row, col }
+          pendingDrawRef.current = { row, col, clientX: touch.clientX, clientY: touch.clientY }
           drawStartTimerRef.current = setTimeout(() => {
             // Only start drawing if we're still in single touch mode and not scrolling
             if (!isPinchingRef.current && !isScrollingRef.current && pendingDrawRef.current) {
               setIsDrawing(true)
-              handlePixelClick(pendingDrawRef.current.row, pendingDrawRef.current.col)
+              if (isFreehandPointerMode) {
+                freehandDown(pendingDrawRef.current.clientX, pendingDrawRef.current.clientY)
+              } else {
+                handlePixelClick(pendingDrawRef.current.row, pendingDrawRef.current.col)
+              }
               pendingDrawRef.current = null
             }
             drawStartTimerRef.current = null
@@ -479,7 +694,7 @@ export default function DrawingCanvas({
         }
       }
     }
-  }, [isSingleClickMode, isSelectMode, pattern, pixelSize, dimensions, handlePixelClick, getPointInCell, zoom, getCellFromPoint, selection, onSelectionChange, activeLayerGrid])
+  }, [isSingleClickMode, isSelectMode, isFreehandPointerMode, previewDragFromLayers, freehandDown, cancelStroke, pattern, pixelSize, dimensions, handlePixelClick, getPointInCell, zoom, getCellFromPoint, selection, onSelectionChange, activeLayerGrid])
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     // Handle pinch gesture
@@ -494,6 +709,7 @@ export default function DrawingCanvas({
       }
 
       isPinchingRef.current = true
+      cancelStroke()
       setIsDrawing(false)
 
       // Initialize pinch if not already started
@@ -572,6 +788,10 @@ export default function DrawingCanvas({
     }
 
     const touch = e.touches[0]
+    if (isFreehandPointerMode) {
+      if (isDrawing) freehandMove(touch.clientX, touch.clientY)
+      return
+    }
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect()
       // Account for zoom when calculating coordinates
@@ -613,12 +833,13 @@ export default function DrawingCanvas({
         handlePixelClick(row, col)
       }
     }
-  }, [isDrawing, isSingleClickMode, isSelectMode, isSelecting, isMovingSelection, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange])
+  }, [isDrawing, isSingleClickMode, isSelectMode, isFreehandPointerMode, freehandMove, cancelStroke, isSelecting, isMovingSelection, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange])
 
   const handleTouchEnd = useCallback(() => {
     if (isSelectMode) {
       finishSelectInteraction()
     }
+    finishStroke()
     setIsDrawing(false)
 
     // Cancel any pending draw
@@ -637,7 +858,7 @@ export default function DrawingCanvas({
     // Reset touch tracking
     touchStartPosRef.current = null
     isScrollingRef.current = false
-  }, [isSelectMode, isMovingSelection, moveDelta, onSelectionMoveEnd])
+  }, [isSelectMode, isMovingSelection, moveDelta, onSelectionMoveEnd, finishStroke])
 
   // Zoom controls
   const handleZoomIn = useCallback(() => {
@@ -685,12 +906,13 @@ export default function DrawingCanvas({
   // (rather than just the cheap destination-cell lookup the paint effect
   // below needs) could block the UI on a large multi-layer drag.
   const dragComposites = useMemo(() => {
-    if (!isMovingSelection) return null
+    // Previewed from the layers themselves instead (displayLayers).
+    if (!isMovingSelection || previewDragFromLayers) return null
     return {
       below: compositeLayers(layers.filter((_, i) => i !== activeLayerIndex)),
       above: compositeLayers(layers.slice(activeLayerIndex + 1)),
     }
-  }, [isMovingSelection, layers, activeLayerIndex])
+  }, [isMovingSelection, previewDragFromLayers, layers, activeLayerIndex])
 
   // Paints the hole (layers below the active one, at the selection's
   // original position) and the floating preview (the active layer's
@@ -920,19 +1142,34 @@ export default function DrawingCanvas({
               })
             )}
 
-            {isSelectMode && selection && !isMovingSelection && (
+            {/* Freehand layers, and the layers above the lowest one, drawn over
+                the cells in stack order. Not interactive - pointer events go
+                to the cells beneath, which carry the row/col the handlers
+                read. Sized in CSS here; paintOverlay sets the bitmap. */}
+            {hasOverlay && (
+              <canvas
+                ref={overlayCanvasRef}
+                className={styles.freehandOverlay}
+                aria-hidden="true"
+                style={{ width: `${overlayWidth}px`, height: `${overlayHeight}px` }}
+              />
+            )}
+
+            {isSelectMode && selection && (!isMovingSelection || previewDragFromLayers) && (
               <div
                 className={styles.selectionMarquee}
                 style={{
-                  left: `${selection.startCol * pixelSize}px`,
-                  top: `${selection.startRow * pixelSize}px`,
+                  // When the drag is previewed from the layers there is no
+                  // floating cell preview, so the marquee itself follows it.
+                  left: `${(selection.startCol + (isMovingSelection ? moveDelta.dCol : 0)) * pixelSize}px`,
+                  top: `${(selection.startRow + (isMovingSelection ? moveDelta.dRow : 0)) * pixelSize}px`,
                   width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
                   height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
                 }}
               />
             )}
 
-            {isSelectMode && selection && isMovingSelection && movingSnapshotRef.current && (
+            {isSelectMode && selection && isMovingSelection && !previewDragFromLayers && movingSnapshotRef.current && (
               <>
                 {/* Renders the other (non-active) layers for this rect onto a
                     canvas - not one <div> per cell - so the hole left by the

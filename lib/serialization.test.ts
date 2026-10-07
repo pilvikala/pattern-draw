@@ -557,3 +557,153 @@ describe('half-pixels in the v2 format', () => {
     expect(result?.layers[0].grid).toEqual(data.layers[0].grid)
   })
 })
+
+describe('freehand layers in the v2 format', () => {
+  const strokeLayer = (overrides: Partial<Layer> = {}): Layer => ({
+    id: 'f1',
+    name: 'Sketch',
+    visible: true,
+    grid: {},
+    type: 'freehand',
+    strokes: [
+      { color: '#ff0000', width: 0.3, points: [1.5, 2.25, 3, 4.75, 5.07, 4.75] },
+      { color: '#0000ff', width: 1.2, points: [10, 10] },
+    ],
+    ...overrides,
+  })
+
+  it('roundtrips strokes exactly, between pixel layers, keeping order and flags', () => {
+    const data = drawing({
+      activeLayerIndex: 1,
+      layers: [
+        { id: 'p1', name: 'Background', visible: true, grid: { '0,0': '#ff0000' } },
+        strokeLayer({ visible: false }),
+        { id: 'p2', name: 'Top', visible: true, grid: { '1,1': '#00ff00' } },
+      ],
+    })
+
+    const result = deserializeDrawing(serializeDrawing(data))
+
+    expect(result?.layers.map((l) => l.name)).toEqual(['Background', 'Sketch', 'Top'])
+    expect(result?.layers[0]).toMatchObject({ grid: { '0,0': '#ff0000' } })
+    expect(result?.layers[0].type).toBeUndefined()
+    expect(result?.layers[1]).toMatchObject({ type: 'freehand', visible: false, grid: {}, strokes: data.layers[1].strokes })
+    expect(result?.layers[2]).toMatchObject({ grid: { '1,1': '#00ff00' } })
+    expect(result?.layers[2].type).toBeUndefined()
+    expect(result?.activeLayerIndex).toBe(1)
+  })
+
+  it('roundtrips an empty freehand layer as a freehand layer, not a pixel layer', () => {
+    const result = deserializeDrawing(serializeDrawing(drawing({ layers: [strokeLayer({ strokes: [] })] })))
+    expect(result?.layers[0]).toMatchObject({ type: 'freehand', strokes: [] })
+  })
+
+  it('roundtrips through the share-link encoding', async () => {
+    const data = drawing({ layers: [strokeLayer()] })
+    const result = await decodeDrawing(await encodeDrawing(data))
+    expect(result?.layers[0].strokes).toEqual(data.layers[0].strokes)
+  })
+
+  it('shares one palette between cells and strokes', () => {
+    const data = drawing({
+      layers: [
+        { id: 'p1', name: 'P', visible: true, grid: { '0,0': '#ff0000' } },
+        strokeLayer({ strokes: [{ color: '#ff0000', width: 0.5, points: [1, 1, 2, 2] }] }),
+      ],
+    })
+    const serialized = serializeDrawing(data)
+    // One distinct color across both layers -> one palette entry.
+    expect(serialized.split('|')[7]).toBe('ff0000')
+    expect(deserializeDrawing(serialized)?.layers[1].strokes?.[0].color).toBe('#ff0000')
+  })
+
+  it('stores a stroke as digits, signs and commas only, so a reader that predates freehand layers skips it', () => {
+    // That older reader splits each ';'-separated grid entry on ':' and
+    // ignores entries with no value after it (see deserializeV2).
+    const serialized = serializeDrawing(drawing({ layers: [strokeLayer()] }))
+    const gridField = serialized.split('|')[10]
+    const entries = gridField.split(';')
+    expect(entries[0]).toBe('~')
+    expect(entries).toHaveLength(3)
+    for (const entry of entries) expect(entry).not.toContain(':')
+    for (const entry of entries.slice(1)) expect(entry).toMatch(/^[-\d,]+$/)
+  })
+
+  it('keeps the layer triples aligned, so layers after a freehand layer still parse', () => {
+    const serialized = serializeDrawing(drawing({
+      layers: [strokeLayer(), { id: 'p', name: 'After', visible: true, grid: { '3,3': '#00ff00' } }],
+    }))
+    // v2 header (8 fields) + 3 fields per layer.
+    expect(serialized.split('|')).toHaveLength(8 + 3 * 2)
+  })
+
+  it('drops a stroke with an unknown palette index without losing the layer', () => {
+    const serialized = 'v2|s|15|20|20|0|0|ff0000|Sketch|1|~;0,30,100,100,50,50;9,30,100,100,50,50'
+    const result = deserializeDrawing(serialized)
+    expect(result?.layers[0].type).toBe('freehand')
+    expect(result?.layers[0].strokes).toEqual([{ color: '#ff0000', width: 0.3, points: [1, 1, 1.5, 1.5] }])
+  })
+
+  it('ignores malformed stroke entries instead of failing the load', () => {
+    const serialized = 'v2|s|15|20|20|0|0|ff0000|Sketch|1|~;;0;0,30;0,30,5;0,abc,1,1;0,30,100,100,50'
+    const result = deserializeDrawing(serialized)
+    expect(result?.layers[0].type).toBe('freehand')
+    expect(result?.layers[0].strokes).toEqual([])
+  })
+
+  it('drops a stroke with an empty numeric field instead of reading it as 0', () => {
+    const serialized = 'v2|s|15|20|20|0|0|ff0000|Sketch|1|~;0,,500,500,100,0;0,30,,500;0,30,500,500,,0;0,30,500,500,100,0'
+    expect(deserializeDrawing(serialized)?.layers[0].strokes).toEqual([{ color: '#ff0000', width: 0.3, points: [5, 5, 6, 5] }])
+  })
+
+  it('clamps stroke coordinates onto the canvas when loading', () => {
+    const serialized = 'v2|s|15|20|20|0|0|ff0000|Sketch|1|~;0,30,-500,99900,100,0'
+    expect(deserializeDrawing(serialized)?.layers[0].strokes).toEqual([{ color: '#ff0000', width: 0.3, points: [0, 20, 0, 20] }])
+  })
+
+  it('bounds the number of strokes parsed from a crafted layer', () => {
+    const entries = Array.from({ length: 12_000 }, () => '0,30,100,100')
+    const serialized = `v2|s|15|20|20|0|0|ff0000|Sketch|1|~;${entries.join(';')}`
+    expect(deserializeDrawing(serialized)?.layers[0].strokes).toHaveLength(10_000)
+  })
+})
+
+describe('drawings saved before freehand layers existed', () => {
+  // A literal v2 string as the previous version wrote it (two pixel layers,
+  // one hidden, one half-pixel). It must keep loading identically, and
+  // re-serializing it must reproduce it byte for byte.
+  const legacy = 'v2|s|15|20|20|1|0,ff0000|ff0000,0|Background|1|0,0:0;1,1:1|Layer%202|0|2,2:0'
+
+  it('loads as pixel layers with no freehand fields', () => {
+    const result = deserializeDrawing(legacy)
+    expect(result?.layers).toHaveLength(2)
+    expect(result?.layers[0]).toMatchObject({ name: 'Background', visible: true, grid: { '0,0': '#ff0000', '1,1': '#000000' } })
+    expect(result?.layers[1]).toMatchObject({ name: 'Layer 2', visible: false, grid: { '2,2': '#ff0000' } })
+    for (const layer of result!.layers) {
+      expect(layer.type).toBeUndefined()
+      expect(layer.strokes).toBeUndefined()
+      expect('type' in layer || 'strokes' in layer).toBe(false)
+    }
+  })
+
+  it('serializes back to exactly the same string', () => {
+    const result = deserializeDrawing(legacy)!
+    expect(serializeDrawing(result)).toBe(legacy)
+  })
+
+  it('reads a pre-layers v1 payload as a single pixel layer', () => {
+    const result = deserializeDrawing('s|15|20|20|ff0000|ff0000|0,0:0')
+    expect(result?.layers).toHaveLength(1)
+    expect(result?.layers[0].type).toBeUndefined()
+    expect(result?.layers[0].grid).toEqual({ '0,0': '#ff0000' })
+  })
+
+  it('loads old JSON (localStorage) layers that have no type field as pixel layers', () => {
+    const result = normalizeDrawingData({
+      pattern: 'squares', pixelSize: 15, canvasWidth: 20, canvasHeight: 20, colors: {},
+      layers: [{ id: 'a', name: 'Layer 1', visible: true, grid: { '0,0': '#ff0000' } }],
+      activeLayerIndex: 0,
+    })
+    expect(result.layers[0]).toEqual({ id: 'a', name: 'Layer 1', visible: true, grid: { '0,0': '#ff0000' } })
+  })
+})

@@ -1,16 +1,28 @@
 'use client'
 
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
-import { PencilIcon, PixelShapeIcon, ChevronDownIcon } from './icons'
+import { PencilIcon, PixelShapeIcon, StrokeWidthIcon, ChevronDownIcon } from './icons'
 import { PIXEL_SHAPES } from '@/lib/cells'
 import type { PixelShape } from '@/lib/cells'
 import styles from './PencilToolButton.module.css'
+
+// Shown in place of the pixel shapes while a freehand layer is active: the
+// pencil then draws a line, so what it offers is the line's thickness.
+export interface FreehandPenSettings {
+  width: number
+  min: number
+  max: number
+  step: number
+  onWidthChange: (width: number) => void
+}
 
 interface PencilToolButtonProps {
   isDrawMode: boolean
   onDrawModeSelect: () => void
   pixelShape: PixelShape
   onPixelShapeChange: (shape: PixelShape) => void
+  // Set while a freehand layer is active.
+  freehandPen?: FreehandPenSettings
   // Styling of the surrounding toolbar, so the pencil matches its sibling tools.
   buttonClassName: string
   activeClassName: string
@@ -24,6 +36,7 @@ export default function PencilToolButton({
   onDrawModeSelect,
   pixelShape,
   onPixelShapeChange,
+  freehandPen,
   buttonClassName,
   activeClassName,
   iconClassName,
@@ -32,7 +45,9 @@ export default function PencilToolButton({
   const toggleRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const isOpen = menuPosition !== null
-  const currentLabel = PIXEL_SHAPES.find((s) => s.shape === pixelShape)?.label ?? ''
+  const shapeLabel = PIXEL_SHAPES.find((s) => s.shape === pixelShape)?.label ?? ''
+  const widthLabel = freehandPen ? `Line width: ${freehandPen.width.toFixed(1)}` : ''
+  const currentLabel = freehandPen ? widthLabel : shapeLabel
 
   // Positioned as `fixed` from the toggle's on-screen rect rather than
   // absolutely inside the toolbar: the compact top bar scrolls horizontally
@@ -80,7 +95,7 @@ export default function PencilToolButton({
     document.addEventListener('keydown', handleKeyDown, true)
     window.addEventListener('resize', close)
     window.addEventListener('scroll', close, true)
-    menuRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus()
+    menuRef.current?.querySelector<HTMLElement>('[aria-checked="true"], input[type="range"]')?.focus()
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown, true)
@@ -99,7 +114,7 @@ export default function PencilToolButton({
       <button
         onClick={onDrawModeSelect}
         className={`${buttonClassName} ${isDrawMode ? activeClassName : ''}`}
-        title={`Draw tool (P) - ${currentLabel}`}
+        title={`Draw tool (P) - ${freehandPen ? 'Freehand' : shapeLabel}`}
         aria-label="Draw tool"
         aria-pressed={isDrawMode}
       >
@@ -109,15 +124,43 @@ export default function PencilToolButton({
         ref={toggleRef}
         onClick={() => (isOpen ? setMenuPosition(null) : openMenu())}
         className={styles.shapeToggle}
-        title={`Pixel shape: ${currentLabel} (0-4 while drawing)`}
-        aria-label={`Pixel shape: ${currentLabel}`}
-        aria-haspopup="menu"
+        title={freehandPen ? `${widthLabel} ([ and ] to change)` : `Pixel shape: ${shapeLabel} (0-4 while drawing)`}
+        aria-label={freehandPen ? widthLabel : `Pixel shape: ${shapeLabel}`}
+        aria-haspopup={freehandPen ? 'dialog' : 'menu'}
         aria-expanded={isOpen}
       >
-        <PixelShapeIcon shape={pixelShape} className={styles.shapeToggleIcon} />
+        {freehandPen ? (
+          <StrokeWidthIcon width={freehandPen.width} min={freehandPen.min} max={freehandPen.max} className={styles.shapeToggleIcon} />
+        ) : (
+          <PixelShapeIcon shape={pixelShape} className={styles.shapeToggleIcon} />
+        )}
         <ChevronDownIcon className={styles.chevron} />
       </button>
-      {menuPosition && (
+      {menuPosition && freehandPen && (
+        <div
+          ref={menuRef}
+          className={`${styles.menu} ${styles.widthMenu}`}
+          role="dialog"
+          aria-label="Line width"
+          style={{ top: menuPosition.top, left: menuPosition.left }}
+        >
+          <label className={styles.widthLabel} htmlFor="stroke-width-slider">
+            Line width <span className={styles.widthValue}>{freehandPen.width.toFixed(1)}</span>
+            <kbd className={styles.shortcut}>[ ]</kbd>
+          </label>
+          <input
+            id="stroke-width-slider"
+            type="range"
+            className={styles.widthSlider}
+            min={freehandPen.min}
+            max={freehandPen.max}
+            step={freehandPen.step}
+            value={Math.min(freehandPen.max, Math.max(freehandPen.min, freehandPen.width))}
+            onChange={(e) => freehandPen.onWidthChange(Number(e.target.value))}
+          />
+        </div>
+      )}
+      {menuPosition && !freehandPen && (
         <div
           ref={menuRef}
           className={styles.menu}

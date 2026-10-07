@@ -94,3 +94,29 @@
   font-size: 0.8rem;
   text-align: center;
 }
+
+/* The freehand pencil's line-width popover, shown instead of the shape list. */
+.widthMenu {
+  gap: 0.35rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.widthLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #333;
+  font-size: 0.9rem;
+}
+
+.widthValue {
+  flex: 1;
+  color: #0070f3;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.widthSlider {
+  width: 100%;
+  margin: 0;
+}

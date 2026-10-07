@@ -140,6 +140,18 @@
   opacity: 0.6;
 }
 
+/* ─── Freehand overlay ────────────────────────────────────────────────────── */
+/* Painted over the cells (see splitRenderLayers) but under the selection
+   overlays. Pointer events fall through to the cells, which carry row/col. */
+.freehandOverlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  pointer-events: none;
+  z-index: 1;
+}
+
 /* ─── Selection overlay ───────────────────────────────────────────────────── */
 .selectionMarquee {
   position: absolute;
