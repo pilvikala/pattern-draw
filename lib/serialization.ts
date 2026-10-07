@@ -1,4 +1,6 @@
 import type { DrawingData, Layer, MatrixPattern } from '@/lib/types'
+import { TRANSPARENT } from '@/lib/types'
+import { isSplitCell, cellQuarters, cellFromQuarters } from '@/lib/cells'
 import { createLayer, createLayerId, migrateGridToLayers, normalizeDrawingData, clampActiveLayerIndex, MAX_LAYERS, MAX_CANVAS_DIMENSION } from '@/lib/layers'
 
 // A generous sanity bound on grid entries parsed per layer while decoding -
@@ -69,11 +71,14 @@ export const MAX_COMPACT_STRING_LENGTH = 10_000_000
 // normalizeDrawingData or any other bound ever runs - a request with a huge
 // body (regardless of what JSON shape it eventually parses to, or fails to)
 // costs that memory/CPU up front, unprotected by any bound downstream.
-// Generous relative to the post-normalization MAX_TOTAL_GRID_ENTRIES cap in
-// lib/layers.ts (2,000,000 cells, each needing well under 25 bytes of raw
-// JSON) so this never rejects a payload that would otherwise be accepted -
-// it only guards against a request many times larger than any drawing the
-// save routes would actually persist.
+// Generous relative to what the save routes can actually persist, so this
+// never rejects a payload that would otherwise be accepted - it only guards
+// against a request many times larger than any drawing they would store.
+// The binding limit is MAX_COMPACT_STRING_LENGTH on the serialized drawing:
+// the most JSON-heavy cell relative to its compact entry is a half-pixel
+// (e.g. `"1,1":"#ff0000,#0000ff,#0000ff,#ff0000",` - about 42 bytes of JSON
+// for a 12-character compact entry `1,1:0.1.1.0;`), so the largest drawing
+// that fits the compact limit is roughly 35MB of JSON, under this cap.
 export const MAX_REQUEST_BODY_BYTES = 50 * 1024 * 1024
 
 // Rejects an absurdly long encoded `?drawing=` value before doing any
@@ -146,7 +151,16 @@ export async function readBoundedRequestBody(request: Request): Promise<string |
  *   deduped/shared across all layers)
  * - each layer contributes 3 '|'-separated fields: URI-encoded name (so a
  *   name can't collide with the '|' separator), '1'/'0' visibility, and its
- *   grid entries ("row,col:colorIndex" joined by ';', only non-transparent cells)
+ *   grid entries joined by ';' (only non-transparent cells), each either
+ *   - "row,col:colorIndex" for a full pixel, or
+ *   - "row,col:top.right.bottom.left" for a half-pixel (see lib/cells.ts):
+ *     four '.'-separated color indexes, empty for a transparent quarter,
+ *     e.g. "3,4:0...0" is a top-left half in color 0.
+ *   Half-pixel entries were added to v2 without bumping the version: every
+ *   pre-existing v2 string is still read exactly as before, and a reader
+ *   that predates half-pixels finds no palette color at "0...0" and drops
+ *   just that cell (normalizeDrawingData rejects it) instead of failing to
+ *   load the whole drawing.
  *
  * Legacy format (v1, no leading "v2"): pattern|pixelSize|width|height|colors|grid
  * - a single flat grid, with no concept of layers or transparency (unset
@@ -162,12 +176,19 @@ export function serializeDrawing(data: DrawingData): string {
   // Colors are deduped/shared across all layers rather than per-layer, so a
   // palette color reused on several layers only costs one index.
   const colorFrequency: Record<string, number> = {}
+  const countColor = (color: string) => {
+    const compressed = compressColor(color)
+    colorFrequency[compressed] = (colorFrequency[compressed] || 0) + 1
+  }
   for (const layer of data.layers) {
     for (const key in layer.grid) {
       const color = layer.grid[key]
       if (!color) continue
-      const compressed = compressColor(color)
-      colorFrequency[compressed] = (colorFrequency[compressed] || 0) + 1
+      if (isSplitCell(color)) {
+        for (const quarter of cellQuarters(color)) if (quarter) countColor(quarter)
+      } else {
+        countColor(color)
+      }
     }
   }
   const allColorsArraySorted = Object.keys(colorFrequency).sort((a, b) => colorFrequency[b] - colorFrequency[a])
@@ -182,7 +203,10 @@ export function serializeDrawing(data: DrawingData): string {
     for (const key in layer.grid) {
       const color = layer.grid[key]
       if (!color) continue
-      gridEntries.push(`${key}:${colorIndexByCompressed.get(compressColor(color))}`)
+      const value = isSplitCell(color)
+        ? cellQuarters(color).map((q) => (q ? colorIndexByCompressed.get(compressColor(q)) : '')).join('.')
+        : colorIndexByCompressed.get(compressColor(color))
+      gridEntries.push(`${key}:${value}`)
     }
     layerFields.push(encodeURIComponent(layer.name), layer.visible ? '1' : '0', gridEntries.join(';'))
   }
@@ -332,7 +356,9 @@ function deserializeV2(parts: string[]): DrawingData | null {
         // Bounded to 2 elements - see the identical comment in
         // deserializeV1 above.
         const [key, colorIdx] = entries[j].split(':', 2)
-        if (key && colorIdx !== undefined) grid[key] = allColors[colorIdx]
+        if (!key || colorIdx === undefined) continue
+        const value = decodeCellValue(colorIdx, allColors)
+        if (value) grid[key] = value
       }
     }
     layers.push({ id: createLayerId(), name, visible, grid })
@@ -350,6 +376,19 @@ function deserializeV2(parts: string[]): DrawingData | null {
     layers,
     activeLayerIndex: clampActiveLayerIndex(activeLayerIndexRaw, layers.length),
   }
+}
+
+// Resolves a v2 grid entry's value - a single palette index, or a half-pixel's
+// four '.'-separated quarter indexes (see serializeDrawing) - into a cell
+// value. An unknown index yields undefined (or a transparent quarter), which
+// normalizeDrawingData then drops, same as before half-pixels existed.
+function decodeCellValue(raw: string, allColors: { [key: string]: string }): string | undefined {
+  if (!raw.includes('.')) return allColors[raw]
+  // Bounded for the same reason as the ':' split in deserializeV2.
+  const indexes = raw.split('.', 5)
+  if (indexes.length !== 4) return undefined
+  const quarters = indexes.map((idx) => (idx ? allColors[idx] ?? TRANSPARENT : TRANSPARENT))
+  return cellFromQuarters(quarters) || undefined
 }
 
 /**

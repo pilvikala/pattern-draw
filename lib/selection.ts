@@ -1,5 +1,6 @@
 import { TRANSPARENT } from './types'
 import type { SelectionRect, ClipboardData } from './types'
+import { mirrorCellHorizontally } from './cells'
 
 export function normalizeRect(rowA: number, colA: number, rowB: number, colB: number): SelectionRect {
   return {
@@ -68,7 +69,9 @@ export function pasteClipboardToGrid(
 }
 
 // Flips the cells inside the rect left-to-right in place. Empty cells move
-// too, so the mirrored area is an exact reflection of the original.
+// too, so the mirrored area is an exact reflection of the original - and
+// half-pixels are flipped within their cell as well (top-left becomes
+// top-right, and so on).
 export function mirrorRectHorizontally(
   grid: { [key: string]: string },
   rect: SelectionRect
@@ -79,7 +82,7 @@ export function mirrorRectHorizontally(
       const color = grid[`${row},${col}`]
       if (!color) continue
       const mirroredCol = rect.startCol + rect.endCol - col
-      newGrid[`${row},${mirroredCol}`] = color
+      newGrid[`${row},${mirroredCol}`] = mirrorCellHorizontally(color)
     }
   }
   return newGrid

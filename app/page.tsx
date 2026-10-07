@@ -16,6 +16,8 @@ import { floodFillGrid } from '@/lib/floodFill'
 import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid, mirrorRectHorizontally } from '@/lib/selection'
 import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, mergeLayerDown, MAX_LAYERS, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
 import { trimHistoryToBudget } from '@/lib/history'
+import { paintCell, cellColorAt, cellQuarters, quarterAt, drawCell, PIXEL_SHAPES } from '@/lib/cells'
+import type { PixelShape } from '@/lib/cells'
 import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry } from '@/lib/types'
 import { TRANSPARENT } from '@/lib/types'
 import UserMenu from '@/components/UserMenu'
@@ -64,6 +66,9 @@ function HomeContent() {
   // load effect and clobber in-progress edits with the original saved data.
   const loadedDrawingIdRef = useRef<string | null>(null)
   const [tool, setTool] = useState<Tool>('draw')
+  // Which part of a cell the pencil paints - the whole cell or one of its
+  // triangular halves (see lib/cells.ts).
+  const [pixelShape, setPixelShape] = useState<PixelShape>('full')
   // Tool to restore once the color picker has been used - the picker is
   // momentary, unlike fill/draw which stay selected until changed.
   const previousToolRef = useRef<Tool>('draw')
@@ -414,6 +419,11 @@ function HomeContent() {
     setTool('draw')
   }
 
+  const handlePixelShapeChange = (shape: PixelShape) => {
+    setPixelShape(shape)
+    setTool('draw')
+  }
+
   const handleEraseModeToggle = (enabled: boolean) => {
     setTool(enabled ? 'erase' : 'draw')
   }
@@ -564,8 +574,8 @@ function HomeContent() {
     }, 10)
   }, [saveToHistoryImmediate])
 
-  // Keyboard shortcuts: undo/redo, tool switching (P/E/F/C/S) and
-  // select-tool actions (copy/cut/paste/mirror/delete/deselect). Ignored while typing in a text input
+  // Keyboard shortcuts: undo/redo, tool switching (P/E/F/C/S), pencil shape
+  // (0-4, only while the pencil is active) and select-tool actions (copy/cut/paste/mirror/delete/deselect). Ignored while typing in a text input
   // so hex-color and canvas-size fields keep working.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -627,6 +637,12 @@ function HomeContent() {
       } else if (noModifiers && key === 's') {
         e.preventDefault()
         handleSelectModeToggle(tool !== 'select')
+      } else if (noModifiers && tool === 'draw') {
+        const shortcut = PIXEL_SHAPES.find((s) => s.key === e.key)
+        if (shortcut) {
+          e.preventDefault()
+          setPixelShape(shortcut.shape)
+        }
       }
     }
 
@@ -634,11 +650,13 @@ function HomeContent() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [tool, selection, clipboard, handleUndo, handleRedo, handleMirror, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleEraseModeToggle, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
 
-  const handlePixelFill = (key: string, color: string) => {
+  // `point` is where in the cell the pointer was, as fractions of the cell's
+  // size - used by the color picker to tell the two halves of a half-pixel apart.
+  const handlePixelFill = (key: string, color: string, point?: { x: number; y: number }) => {
     if (tool === 'colorPicker') {
       // Pick the color as it's visually shown (composited across all visible
       // layers), then return to whichever tool was active before.
-      const pixelColor = compositeGrid[key] || '#ffffff'
+      const pixelColor = cellColorAt(compositeGrid[key], point?.x ?? 0.5, point?.y ?? 0.5) || '#ffffff'
       setSelectedColor(pixelColor)
       handleColorSave(pixelColor)
       setTool(previousToolRef.current)
@@ -646,12 +664,15 @@ function HomeContent() {
       const [rowStr, colStr] = key.split(',')
       const row = parseInt(rowStr, 10)
       const col = parseInt(colStr, 10)
+      // Fill starts from the clicked quarter of the cell, so clicking the
+      // empty half of a half-pixel fills the area around it, not the cell.
       const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
-      const targetColor = activeGrid[key] || TRANSPARENT
+      const startQuarter = quarterAt(point?.x ?? 0.5, point?.y ?? 0.5)
+      const targetColor = cellQuarters(activeGrid[key])[startQuarter] || TRANSPARENT
       if (targetColor === color) return
 
       updateActiveLayerGrid(
-        (prev) => floodFillGrid(prev, row, col, targetColor, color, canvasWidth, canvasHeight),
+        (prev) => floodFillGrid(prev, row, col, targetColor, color, canvasWidth, canvasHeight, startQuarter),
         () => { if (!isUndoRedoRef.current) saveToHistory() }
       )
     } else if (tool === 'erase') {
@@ -668,8 +689,12 @@ function HomeContent() {
         () => { if (!isUndoRedoRef.current) saveToHistory() }
       )
     } else {
+      // Dragging repeatedly hits the same cell - skip the no-op update.
+      const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
+      if (activeGrid[key] === paintCell(activeGrid[key], color, pixelShape)) return
+
       updateActiveLayerGrid(
-        (prev) => ({ ...prev, [key]: color }),
+        (prev) => ({ ...prev, [key]: paintCell(prev[key], color, pixelShape) }),
         () => { if (!isUndoRedoRef.current) saveToHistory() }
       )
     }
@@ -831,8 +856,6 @@ function HomeContent() {
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
         const key = `${row},${col}`
-        const color = flatGrid[key] || '#ffffff'
-
         let x = col * pixelSize
         let y = row * pixelSize
 
@@ -842,8 +865,8 @@ function HomeContent() {
           y += pixelSize / 2
         }
 
-        ctx.fillStyle = color
-        ctx.fillRect(x, y, pixelSize, pixelSize)
+        // Empty cells (and empty halves) keep the white background.
+        drawCell(ctx, flatGrid[key], x, y, pixelSize)
         ctx.strokeRect(x, y, pixelSize, pixelSize)
       }
     }
@@ -1198,6 +1221,8 @@ function HomeContent() {
                 onColorSave={handleColorSave}
                 isDrawMode={tool === 'draw'}
                 onDrawModeSelect={handleDrawModeSelect}
+                pixelShape={pixelShape}
+                onPixelShapeChange={handlePixelShapeChange}
                 isEraseMode={tool === 'erase'}
                 onEraseModeToggle={handleEraseModeToggle}
                 isColorPickerMode={tool === 'colorPicker'}
@@ -1281,6 +1306,8 @@ function HomeContent() {
                 onColorSave={handleColorSave}
                 isDrawMode={tool === 'draw'}
                 onDrawModeSelect={handleDrawModeSelect}
+                pixelShape={pixelShape}
+                onPixelShapeChange={handlePixelShapeChange}
                 isEraseMode={tool === 'erase'}
                 onEraseModeToggle={handleEraseModeToggle}
                 isColorPickerMode={tool === 'colorPicker'}

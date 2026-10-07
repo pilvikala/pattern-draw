@@ -1,7 +1,9 @@
 'use client'
 
 import { useRef } from 'react'
-import { PencilIcon, EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
+import { EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
+import PencilToolButton from './PencilToolButton'
+import type { PixelShape } from '@/lib/cells'
 import styles from './ColorPicker.module.css'
 
 interface ColorPickerProps {
@@ -10,6 +12,8 @@ interface ColorPickerProps {
   onColorSave: (color: string) => void
   isDrawMode: boolean
   onDrawModeSelect: () => void
+  pixelShape: PixelShape
+  onPixelShapeChange: (shape: PixelShape) => void
   isEraseMode: boolean
   onEraseModeToggle: (enabled: boolean) => void
   isColorPickerMode: boolean
@@ -32,6 +36,8 @@ export default function ColorPicker({
   onColorSave,
   isDrawMode,
   onDrawModeSelect,
+  pixelShape,
+  onPixelShapeChange,
   isEraseMode,
   onEraseModeToggle,
   isColorPickerMode,
@@ -87,15 +93,15 @@ export default function ColorPicker({
         >
           +
         </button>
-        <button
-          onClick={onDrawModeSelect}
-          className={`${styles.toolButton} ${isDrawMode ? styles.active : ''}`}
-          title={isDrawMode ? 'Draw tool active (P)' : 'Draw tool (P)'}
-          aria-label="Draw tool"
-          aria-pressed={isDrawMode}
-        >
-          <PencilIcon className={styles.toolIcon} />
-        </button>
+        <PencilToolButton
+          isDrawMode={isDrawMode}
+          onDrawModeSelect={onDrawModeSelect}
+          pixelShape={pixelShape}
+          onPixelShapeChange={onPixelShapeChange}
+          buttonClassName={styles.toolButton}
+          activeClassName={styles.active}
+          iconClassName={styles.toolIcon}
+        />
         <button
           onClick={() => onEraseModeToggle(!isEraseMode)}
           className={`${styles.toolButton} ${isEraseMode ? styles.active : ''}`}

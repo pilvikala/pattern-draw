@@ -1,6 +1,8 @@
 'use client'
 
-import { PencilIcon, EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
+import { EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
+import PencilToolButton from './PencilToolButton'
+import type { PixelShape } from '@/lib/cells'
 import styles from './CompactColorPicker.module.css'
 
 interface CompactColorPickerProps {
@@ -9,6 +11,8 @@ interface CompactColorPickerProps {
   onColorSave: (color: string) => void
   isDrawMode: boolean
   onDrawModeSelect: () => void
+  pixelShape: PixelShape
+  onPixelShapeChange: (shape: PixelShape) => void
   isEraseMode: boolean
   onEraseModeToggle: (enabled: boolean) => void
   isColorPickerMode: boolean
@@ -31,6 +35,8 @@ export default function CompactColorPicker({
   onColorSave,
   isDrawMode,
   onDrawModeSelect,
+  pixelShape,
+  onPixelShapeChange,
   isEraseMode,
   onEraseModeToggle,
   isColorPickerMode,
@@ -74,14 +80,15 @@ export default function CompactColorPicker({
       >
         +
       </button>
-      <button
-        onClick={onDrawModeSelect}
-        className={`${styles.pickerButton} ${isDrawMode ? styles.active : ''}`}
-        title="Draw tool (P)"
-        aria-pressed={isDrawMode}
-      >
-        <PencilIcon className={styles.pickerIcon} />
-      </button>
+      <PencilToolButton
+        isDrawMode={isDrawMode}
+        onDrawModeSelect={onDrawModeSelect}
+        pixelShape={pixelShape}
+        onPixelShapeChange={onPixelShapeChange}
+        buttonClassName={styles.pickerButton}
+        activeClassName={styles.active}
+        iconClassName={styles.pickerIcon}
+      />
       <button
         onClick={() => onEraseModeToggle(!isEraseMode)}
         className={`${styles.pickerButton} ${isEraseMode ? styles.active : ''}`}
