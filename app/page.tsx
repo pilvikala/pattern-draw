@@ -14,11 +14,25 @@ import LayersDrawer from '@/components/LayersDrawer'
 import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
 import { floodFillGrid } from '@/lib/floodFill'
 import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid, mirrorRectHorizontally } from '@/lib/selection'
-import { compositeLayers, createLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, mergeLayerDown, MAX_LAYERS, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
+import { compositeLayers, createLayer, createFreehandLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, mergeLayerDown, isFreehandLayer, MAX_LAYERS, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
+import {
+  canvasBounds,
+  clearStrokesInRect,
+  copyStrokesInRect,
+  eraseStrokesAt,
+  mirrorStrokesInRect,
+  moveStrokesInRect,
+  pasteStrokes,
+  shiftStrokes,
+  strokeColorAt,
+  strokesWithinLimits,
+  DEFAULT_STROKE_WIDTH,
+} from '@/lib/strokes'
 import { trimHistoryToBudget } from '@/lib/history'
+import { drawOverlayLayers, splitRenderLayers } from '@/lib/freehandRender'
 import { paintCell, cellColorAt, cellQuarters, quarterAt, drawCell, PIXEL_SHAPES } from '@/lib/cells'
 import type { PixelShape } from '@/lib/cells'
-import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry } from '@/lib/types'
+import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry, Stroke } from '@/lib/types'
 import { TRANSPARENT } from '@/lib/types'
 import UserMenu from '@/components/UserMenu'
 import { useToast } from '@/components/ToastProvider'
@@ -30,6 +44,13 @@ export type { MatrixPattern, DrawingData } from '@/lib/types'
 // A drawing shared as a URL becomes unwieldy (and risks silent truncation by
 // chat apps, SMS, older proxies, etc.) past roughly this many characters.
 const SAFE_SHARE_URL_LENGTH = 2000
+
+// The line-width slider's range and step, in cells. Pixel size scales it, so
+// the same width looks right on any canvas zoom; loaded drawings may carry
+// wider strokes than the slider offers (see MAX_STROKE_WIDTH).
+const STROKE_WIDTH_MIN = 0.1
+const STROKE_WIDTH_MAX = 2
+const STROKE_WIDTH_STEP = 0.1
 
 // Prisma's default cuid() ids are alphanumeric; this is intentionally a bit
 // more permissive (covers uuid/nanoid too) while still rejecting anything
@@ -69,6 +90,8 @@ function HomeContent() {
   // Which part of a cell the pencil paints - the whole cell or one of its
   // triangular halves (see lib/cells.ts).
   const [pixelShape, setPixelShape] = useState<PixelShape>('full')
+  // Thickness, in cells, of the pencil's line on a freehand layer.
+  const [strokeWidth, setStrokeWidth] = useState(DEFAULT_STROKE_WIDTH)
   // Tool to restore once the color picker has been used - the picker is
   // momentary, unlike fill/draw which stay selected until changed.
   const previousToolRef = useRef<Tool>('draw')
@@ -93,8 +116,20 @@ function HomeContent() {
 
   // The flattened view of all visible layers - what's actually drawn on the
   // canvas and what export/preview render.
-  const compositeGrid = useMemo(() => compositeLayers(layers), [layers])
+  // Only the layers below the lowest visible freehand layer: that layer and
+  // everything above it is drawn over the grid by DrawingCanvas, so a freehand
+  // layer can sit anywhere in the stack (see splitRenderLayers). With no
+  // visible freehand layer this is every layer, as it always was.
+  const compositeGrid = useMemo(() => compositeLayers(splitRenderLayers(layers).base), [layers])
   const activeLayer = layers[activeLayerIndex] ?? layers[0]
+  const activeIsFreehand = isFreehandLayer(activeLayer)
+  const strokeBounds = useMemo(() => canvasBounds(pattern, canvasWidth, canvasHeight), [pattern, canvasWidth, canvasHeight])
+  // What the pencil's menu shows instead of the pixel shapes while a freehand
+  // layer is active.
+  const freehandPen = useMemo(
+    () => (activeIsFreehand ? { width: strokeWidth, min: STROKE_WIDTH_MIN, max: STROKE_WIDTH_MAX, step: STROKE_WIDTH_STEP, onWidthChange: setStrokeWidth } : undefined),
+    [activeIsFreehand, strokeWidth]
+  )
   // The moving-selection "hole"/floating-preview composites (everything
   // except the active layer, and everything above it) are computed inside
   // DrawingCanvas itself, from the raw `layers`/`activeLayerIndex` passed
@@ -461,6 +496,47 @@ function HomeContent() {
     onApplied?.()
   }, [])
 
+  // The freehand counterpart of updateActiveLayerGrid. Returns whether the
+  // update was applied: an edit that would leave the layer over its stroke
+  // limits is refused (see strokesWithinLimits) rather than applied and then
+  // silently cut off the next time the drawing is saved or reloaded. Cutting
+  // a stroke in two counts, so even removing part of a layer can hit it.
+  const updateActiveLayerStrokes = useCallback((
+    updater: (strokes: Stroke[]) => Stroke[],
+    onApplied?: () => void
+  ): boolean => {
+    const idx = activeLayerIndexRef.current
+    const targetLayer = layersRef.current[idx]
+    if (!targetLayer || !isFreehandLayer(targetLayer)) return false
+    const newStrokes = updater(targetLayer.strokes ?? [])
+    if (!strokesWithinLimits(newStrokes)) {
+      showToast('This layer has too many strokes. Add another freehand layer to keep drawing.', 'error')
+      return false
+    }
+    const newLayers = layersRef.current.map((l, i) => (i === idx ? { ...l, strokes: newStrokes } : l))
+    layersRef.current = newLayers
+    setLayers(newLayers)
+    onApplied?.()
+    return true
+  }, [showToast])
+
+  const getActiveStrokes = (): Stroke[] => layersRef.current[activeLayerIndexRef.current]?.strokes ?? []
+
+  // A finished pencil stroke from the canvas - one undo step per stroke.
+  const handleStrokeCommit = useCallback((stroke: Stroke) => {
+    updateActiveLayerStrokes((prev) => [...prev, stroke], saveToHistoryImmediate)
+  }, [saveToHistoryImmediate, updateActiveLayerStrokes])
+
+  // The eraser on a freehand layer removes whole strokes it touches.
+  const handleStrokeErase = useCallback((x: number, y: number, radius: number) => {
+    const current = layersRef.current[activeLayerIndexRef.current]?.strokes ?? []
+    if (eraseStrokesAt(current, x, y, radius) === current) return
+    updateActiveLayerStrokes(
+      (prev) => eraseStrokesAt(prev, x, y, radius),
+      () => { if (!isUndoRedoRef.current) saveToHistory() }
+    )
+  }, [saveToHistory, updateActiveLayerStrokes])
+
   const handleSelectionMoveEnd = useCallback((deltaRow: number, deltaCol: number) => {
     if (!selection) return
     const newRect: SelectionRect = {
@@ -469,33 +545,60 @@ function HomeContent() {
       endRow: selection.endRow + deltaRow,
       endCol: selection.endCol + deltaCol,
     }
-    updateActiveLayerGrid((prev) => {
-      const clip = copySelectionCells(prev, selection)
-      let newGrid = clearRectFromGrid(prev, selection)
-      newGrid = pasteClipboardToGrid(newGrid, clip, newRect.startRow, newRect.startCol, canvasWidth, canvasHeight)
-      return newGrid
-    }, saveToHistoryImmediate)
+    if (isFreehandLayer(layersRef.current[activeLayerIndexRef.current])) {
+      if (!updateActiveLayerStrokes((prev) => moveStrokesInRect(prev, selection, deltaRow, deltaCol, strokeBounds), saveToHistoryImmediate)) return
+    } else {
+      updateActiveLayerGrid((prev) => {
+        const clip = copySelectionCells(prev, selection)
+        let newGrid = clearRectFromGrid(prev, selection)
+        newGrid = pasteClipboardToGrid(newGrid, clip, newRect.startRow, newRect.startCol, canvasWidth, canvasHeight)
+        return newGrid
+      }, saveToHistoryImmediate)
+    }
     setSelection(newRect)
-  }, [selection, canvasWidth, canvasHeight, saveToHistoryImmediate, updateActiveLayerGrid])
+  }, [selection, canvasWidth, canvasHeight, strokeBounds, saveToHistoryImmediate, updateActiveLayerGrid, updateActiveLayerStrokes])
 
   const handleCopy = useCallback(() => {
     if (!selection) return
+    if (isFreehandLayer(layersRef.current[activeLayerIndexRef.current])) {
+      setClipboard(copyStrokesInRect(getActiveStrokes(), selection))
+      return
+    }
     const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
     setClipboard(copySelectionCells(activeGrid, selection))
   }, [selection])
 
   const handleCut = useCallback(() => {
     if (!selection) return
+    if (isFreehandLayer(layersRef.current[activeLayerIndexRef.current])) {
+      const copied = copyStrokesInRect(getActiveStrokes(), selection)
+      if (updateActiveLayerStrokes((prev) => clearStrokesInRect(prev, selection), saveToHistoryImmediate)) setClipboard(copied)
+      return
+    }
     const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
     setClipboard(copySelectionCells(activeGrid, selection))
     updateActiveLayerGrid((prev) => clearRectFromGrid(prev, selection), saveToHistoryImmediate)
-  }, [selection, saveToHistoryImmediate, updateActiveLayerGrid])
+  }, [selection, saveToHistoryImmediate, updateActiveLayerGrid, updateActiveLayerStrokes])
 
   const handlePaste = useCallback(() => {
     if (!clipboard) return
     const targetRow = selection ? selection.startRow : 0
     const targetCol = selection ? selection.startCol : 0
-    updateActiveLayerGrid((prev) => pasteClipboardToGrid(prev, clipboard, targetRow, targetCol, canvasWidth, canvasHeight), saveToHistoryImmediate)
+    // Strokes and cells can't be converted into each other.
+    const clipboardIsStrokes = !!clipboard.strokes
+    const layerIsFreehand = isFreehandLayer(layersRef.current[activeLayerIndexRef.current])
+    if (clipboardIsStrokes !== layerIsFreehand) {
+      showToast(
+        clipboardIsStrokes ? "Strokes can't be pasted onto a pixel layer." : "Pixels can't be pasted onto a freehand layer.",
+        'error'
+      )
+      return
+    }
+    if (layerIsFreehand) {
+      if (!updateActiveLayerStrokes((prev) => pasteStrokes(prev, clipboard, targetRow, targetCol, strokeBounds), saveToHistoryImmediate)) return
+    } else {
+      updateActiveLayerGrid((prev) => pasteClipboardToGrid(prev, clipboard, targetRow, targetCol, canvasWidth, canvasHeight), saveToHistoryImmediate)
+    }
     setTool('select')
     setSelection({
       startRow: targetRow,
@@ -503,12 +606,16 @@ function HomeContent() {
       endRow: Math.min(targetRow + clipboard.height - 1, canvasHeight - 1),
       endCol: Math.min(targetCol + clipboard.width - 1, canvasWidth - 1),
     })
-  }, [clipboard, selection, canvasWidth, canvasHeight, saveToHistoryImmediate, updateActiveLayerGrid])
+  }, [clipboard, selection, canvasWidth, canvasHeight, strokeBounds, showToast, saveToHistoryImmediate, updateActiveLayerGrid, updateActiveLayerStrokes])
 
   const handleDeleteSelection = useCallback(() => {
     if (!selection) return
+    if (isFreehandLayer(layersRef.current[activeLayerIndexRef.current])) {
+      updateActiveLayerStrokes((prev) => clearStrokesInRect(prev, selection), saveToHistoryImmediate)
+      return
+    }
     updateActiveLayerGrid((prev) => clearRectFromGrid(prev, selection), saveToHistoryImmediate)
-  }, [selection, saveToHistoryImmediate, updateActiveLayerGrid])
+  }, [selection, saveToHistoryImmediate, updateActiveLayerGrid, updateActiveLayerStrokes])
 
   const handleDeselect = useCallback(() => {
     setSelection(null)
@@ -516,8 +623,12 @@ function HomeContent() {
 
   const handleMirror = useCallback(() => {
     if (!selection) return
+    if (isFreehandLayer(layersRef.current[activeLayerIndexRef.current])) {
+      updateActiveLayerStrokes((prev) => mirrorStrokesInRect(prev, selection), saveToHistoryImmediate)
+      return
+    }
     updateActiveLayerGrid((prev) => mirrorRectHorizontally(prev, selection), saveToHistoryImmediate)
-  }, [selection, saveToHistoryImmediate, updateActiveLayerGrid])
+  }, [selection, saveToHistoryImmediate, updateActiveLayerGrid, updateActiveLayerStrokes])
 
   const handleUndo = useCallback(() => {
     saveToHistoryImmediate()
@@ -574,8 +685,17 @@ function HomeContent() {
     }, 10)
   }, [saveToHistoryImmediate])
 
+  // Fill needs cells to flood, so it isn't available on a freehand layer:
+  // selecting one (or undoing/redoing onto one, or returning from the color
+  // picker to a remembered fill tool) while fill is active falls back to the
+  // pencil.
+  useEffect(() => {
+    if (tool === 'fill' && activeIsFreehand) setTool('draw')
+  }, [tool, activeIsFreehand])
+
   // Keyboard shortcuts: undo/redo, tool switching (P/E/F/C/S), pencil shape
-  // (0-4, only while the pencil is active) and select-tool actions (copy/cut/paste/mirror/delete/deselect). Ignored while typing in a text input
+  // (0-4, only while the pencil is active on a pixel layer), line width ([ and
+  // ], on a freehand layer) and select-tool actions (copy/cut/paste/mirror/delete/deselect). Ignored while typing in a text input
   // so hex-color and canvas-size fields keep working.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -630,14 +750,18 @@ function HomeContent() {
         handleEraseModeToggle(tool !== 'erase')
       } else if (noModifiers && key === 'f') {
         e.preventDefault()
-        handleFillModeToggle(tool !== 'fill')
+        if (!activeIsFreehand) handleFillModeToggle(tool !== 'fill')
       } else if (noModifiers && key === 'c') {
         e.preventDefault()
         handleColorPickerModeToggle(tool !== 'colorPicker')
       } else if (noModifiers && key === 's') {
         e.preventDefault()
         handleSelectModeToggle(tool !== 'select')
-      } else if (noModifiers && tool === 'draw') {
+      } else if (noModifiers && activeIsFreehand && (e.key === '[' || e.key === ']')) {
+        e.preventDefault()
+        const step = e.key === ']' ? STROKE_WIDTH_STEP : -STROKE_WIDTH_STEP
+        setStrokeWidth((w) => Math.round(Math.max(STROKE_WIDTH_MIN, Math.min(STROKE_WIDTH_MAX, w + step)) * 100) / 100)
+      } else if (noModifiers && tool === 'draw' && !activeIsFreehand) {
         const shortcut = PIXEL_SHAPES.find((s) => s.key === e.key)
         if (shortcut) {
           e.preventDefault()
@@ -648,19 +772,45 @@ function HomeContent() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [tool, selection, clipboard, handleUndo, handleRedo, handleMirror, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleEraseModeToggle, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
+  }, [tool, activeIsFreehand, selection, clipboard, handleUndo, handleRedo, handleMirror, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleEraseModeToggle, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
+
+  // The color a viewer sees at a spot: the topmost visible layer that has
+  // paint there - a cell's color (the half under the pointer, for a
+  // half-pixel) or a stroke passing under it - else the white paper. Walking
+  // the stack top-down, rather than reading the flattened grid, is what lets
+  // this see through a freehand layer to the pixels beneath it and vice versa.
+  const pickVisibleColor = (key: string, point?: { x: number; y: number }): string => {
+    const [rowStr, colStr] = key.split(',')
+    const row = parseInt(rowStr, 10)
+    const col = parseInt(colStr, 10)
+    const fx = point?.x ?? 0.5
+    const fy = point?.y ?? 0.5
+    // The same spot in canvas coordinates, which is what strokes use: the
+    // brick patterns shift every other row/column by half a cell.
+    const x = col + fx + (pattern === 'bricks' && row % 2 === 1 ? 0.5 : 0)
+    const y = row + fy + (pattern === 'bricksVertical' && col % 2 === 1 ? 0.5 : 0)
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const layer = layers[i]
+      if (!layer.visible) continue
+      const color = isFreehandLayer(layer) ? strokeColorAt(layer.strokes ?? [], x, y) : cellColorAt(layer.grid[key], fx, fy)
+      if (color) return color
+    }
+    return '#ffffff'
+  }
 
   // `point` is where in the cell the pointer was, as fractions of the cell's
   // size - used by the color picker to tell the two halves of a half-pixel apart.
   const handlePixelFill = (key: string, color: string, point?: { x: number; y: number }) => {
     if (tool === 'colorPicker') {
-      // Pick the color as it's visually shown (composited across all visible
-      // layers), then return to whichever tool was active before.
-      const pixelColor = cellColorAt(compositeGrid[key], point?.x ?? 0.5, point?.y ?? 0.5) || '#ffffff'
+      // Pick the color as it's visually shown, then return to whichever tool
+      // was active before.
+      const pixelColor = pickVisibleColor(key, point)
       setSelectedColor(pixelColor)
       handleColorSave(pixelColor)
       setTool(previousToolRef.current)
     } else if (tool === 'fill') {
+      // Fill has nothing to flood on a layer of strokes.
+      if (isFreehandLayer(layersRef.current[activeLayerIndexRef.current])) return
       const [rowStr, colStr] = key.split(',')
       const row = parseInt(rowStr, 10)
       const col = parseInt(colStr, 10)
@@ -767,7 +917,11 @@ function HomeContent() {
       const colOffset = Math.floor((newWidth - canvasWidth) / 2)
       const rowOffset = Math.floor((newHeight - canvasHeight) / 2)
 
+      const newBounds = canvasBounds(pattern, newWidth, newHeight)
       const shiftedLayers = layersRef.current.map((layer) => {
+        if (isFreehandLayer(layer)) {
+          return { ...layer, strokes: shiftStrokes(layer.strokes ?? [], colOffset, rowOffset, newBounds) }
+        }
         const shiftedGrid: { [key: string]: string } = {}
         for (const key in layer.grid) {
           const [rowStr, colStr] = key.split(',')
@@ -850,8 +1004,11 @@ function HomeContent() {
     ctx.lineWidth = 1
 
     // Flatten all visible layers into a single composite before rendering -
-    // this is the "merge to a single layer" export behavior.
-    const flatGrid = compositeLayers(layers)
+    // this is the "merge to a single layer" export behavior. Layers from the
+    // lowest visible freehand layer up can't be flattened into cells, so
+    // they're drawn over the grid afterwards, in stack order.
+    const { base, overlay } = splitRenderLayers(layers)
+    const flatGrid = compositeLayers(base)
 
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
@@ -869,6 +1026,13 @@ function HomeContent() {
         drawCell(ctx, flatGrid[key], x, y, pixelSize)
         ctx.strokeRect(x, y, pixelSize, pixelSize)
       }
+    }
+
+    if (overlay.length > 0) {
+      ctx.save()
+      ctx.scale(pixelSize, pixelSize)
+      drawOverlayLayers(ctx, overlay, { pattern, pixelSize })
+      ctx.restore()
     }
 
     canvas.toBlob((blob) => {
@@ -1006,7 +1170,7 @@ function HomeContent() {
   // history with duplicate/divergent entries. Reading layersRef.current
   // directly is safe here since it's always kept in sync synchronously.
 
-  const handleAddLayer = useCallback(() => {
+  const addLayer = useCallback((kind: 'pixel' | 'freehand') => {
     // Mirrors the MAX_LAYERS cap normalizeDrawingData enforces for
     // loaded/shared data - without this, ordinary repeated clicking could
     // grow every composite, history snapshot, and localStorage payload
@@ -1016,7 +1180,7 @@ function HomeContent() {
       return
     }
     const newIndex = layersRef.current.length
-    const newLayer = createLayer(`Layer ${newIndex + 1}`)
+    const newLayer = kind === 'freehand' ? createFreehandLayer(`Freehand ${newIndex + 1}`) : createLayer(`Layer ${newIndex + 1}`)
     const newLayers = [...layersRef.current, newLayer]
     layersRef.current = newLayers
     setLayers(newLayers)
@@ -1025,6 +1189,9 @@ function HomeContent() {
     setSelection(null)
     saveToHistoryImmediate()
   }, [saveToHistoryImmediate, showToast])
+
+  const handleAddLayer = useCallback(() => addLayer('pixel'), [addLayer])
+  const handleAddFreehandLayer = useCallback(() => addLayer('freehand'), [addLayer])
 
   const handleDeleteLayer = useCallback((id: string) => {
     const prev = layersRef.current
@@ -1105,6 +1272,9 @@ function HomeContent() {
     if (index <= 0 || !prev[index].visible) return
 
     const newLayers = mergeLayerDown(prev, id)
+    // Not mergeable after all (e.g. a pixel and a freehand layer): nothing
+    // changed, so don't move the active layer as if it had.
+    if (newLayers === prev) return
     layersRef.current = newLayers
     setLayers(newLayers)
 
@@ -1126,6 +1296,7 @@ function HomeContent() {
     canAddLayer: layers.length < MAX_LAYERS,
     onSelectLayer: handleSetActiveLayer,
     onAddLayer: handleAddLayer,
+    onAddFreehandLayer: handleAddFreehandLayer,
     onDeleteLayer: handleDeleteLayer,
     onRenameLayer: handleRenameLayer,
     onToggleVisibility: handleToggleLayerVisibility,
@@ -1223,12 +1394,14 @@ function HomeContent() {
                 onDrawModeSelect={handleDrawModeSelect}
                 pixelShape={pixelShape}
                 onPixelShapeChange={handlePixelShapeChange}
+                freehandPen={freehandPen}
                 isEraseMode={tool === 'erase'}
                 onEraseModeToggle={handleEraseModeToggle}
                 isColorPickerMode={tool === 'colorPicker'}
                 onColorPickerModeToggle={handleColorPickerModeToggle}
                 isFillMode={tool === 'fill'}
                 onFillModeToggle={handleFillModeToggle}
+                fillDisabled={activeIsFreehand}
                 isSelectMode={tool === 'select'}
                 onSelectModeToggle={handleSelectModeToggle}
                 canCopy={tool === 'select' && !!selection}
@@ -1258,6 +1431,7 @@ function HomeContent() {
                 canvasWidth={canvasWidth}
                 canvasHeight={canvasHeight}
                 selectedColor={selectedColor}
+                strokeWidth={strokeWidth}
                 grid={compositeGrid}
                 activeLayerGrid={activeLayer?.grid || {}}
                 layers={layers}
@@ -1267,6 +1441,8 @@ function HomeContent() {
                 selection={selection}
                 onSelectionChange={handleSelectionChange}
                 onSelectionMoveEnd={handleSelectionMoveEnd}
+                onStrokeCommit={handleStrokeCommit}
+                onStrokeErase={handleStrokeErase}
               />
             </div>
           </div>
@@ -1308,12 +1484,14 @@ function HomeContent() {
                 onDrawModeSelect={handleDrawModeSelect}
                 pixelShape={pixelShape}
                 onPixelShapeChange={handlePixelShapeChange}
+                freehandPen={freehandPen}
                 isEraseMode={tool === 'erase'}
                 onEraseModeToggle={handleEraseModeToggle}
                 isColorPickerMode={tool === 'colorPicker'}
                 onColorPickerModeToggle={handleColorPickerModeToggle}
                 isFillMode={tool === 'fill'}
                 onFillModeToggle={handleFillModeToggle}
+                fillDisabled={activeIsFreehand}
                 isSelectMode={tool === 'select'}
                 onSelectModeToggle={handleSelectModeToggle}
                 canCopy={tool === 'select' && !!selection}

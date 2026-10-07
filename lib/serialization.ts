@@ -1,7 +1,8 @@
-import type { DrawingData, Layer, MatrixPattern } from '@/lib/types'
+import type { DrawingData, Layer, MatrixPattern, Stroke } from '@/lib/types'
 import { TRANSPARENT } from '@/lib/types'
 import { isSplitCell, cellQuarters, cellFromQuarters } from '@/lib/cells'
 import { createLayer, createLayerId, migrateGridToLayers, normalizeDrawingData, clampActiveLayerIndex, MAX_LAYERS, MAX_CANVAS_DIMENSION } from '@/lib/layers'
+import { MAX_POINTS_PER_STROKE, MAX_STROKES_PER_LAYER } from '@/lib/strokes'
 
 // A generous sanity bound on grid entries parsed per layer while decoding -
 // independent of (and coarser than) normalizeDrawingData's exact per-canvas
@@ -161,6 +162,21 @@ export async function readBoundedRequestBody(request: Request): Promise<string |
  *   that predates half-pixels finds no palette color at "0...0" and drops
  *   just that cell (normalizeDrawingData rejects it) instead of failing to
  *   load the whole drawing.
+ * - a freehand layer (pen strokes instead of cells) keeps the same three
+ *   fields, so layer positions never shift, but its grid field is
+ *   "~;stroke;stroke;..." - a literal "~" entry marking the layer type (it
+ *   must be there even for a layer with no strokes) followed by one entry
+ *   per stroke: "colorIndex,width,x0,y0,dx1,dy1,dx2,dy2,..." - a palette
+ *   index shared with the cells, then plain integers in hundredths of a grid
+ *   cell: the line width, the first point, and each later point as an
+ *   offset from the one before it (which keeps the numbers short). Like
+ *   half-pixels this needed no version bump: a reader that predates freehand
+ *   layers splits every entry on ':', finds none (stroke entries contain
+ *   only digits, '-' and ','), skips them all, and shows an empty layer
+ *   under the same name instead of failing - and a pixel layer's grid
+ *   field, which always starts with a digit or '-', can never be mistaken
+ *   for one. Drawings without freehand layers serialize byte-for-byte as
+ *   before.
  *
  * Legacy format (v1, no leading "v2"): pattern|pixelSize|width|height|colors|grid
  * - a single flat grid, with no concept of layers or transparency (unset
@@ -190,6 +206,7 @@ export function serializeDrawing(data: DrawingData): string {
         countColor(color)
       }
     }
+    for (const stroke of layer.strokes ?? []) countColor(stroke.color)
   }
   const allColorsArraySorted = Object.keys(colorFrequency).sort((a, b) => colorFrequency[b] - colorFrequency[a])
   // indexOf would rescan the whole palette per painted cell (O(paintedCells
@@ -199,6 +216,11 @@ export function serializeDrawing(data: DrawingData): string {
 
   const layerFields: string[] = []
   for (const layer of data.layers) {
+    if (layer.type === 'freehand') {
+      const strokeEntries = (layer.strokes ?? []).map((stroke) => encodeStroke(stroke, colorIndexByCompressed.get(compressColor(stroke.color))))
+      layerFields.push(encodeURIComponent(layer.name), layer.visible ? '1' : '0', [FREEHAND_MARKER, ...strokeEntries].join(';'))
+      continue
+    }
     const gridEntries: string[] = []
     for (const key in layer.grid) {
       const color = layer.grid[key]
@@ -348,6 +370,10 @@ function deserializeV2(parts: string[]): DrawingData | null {
     const name = decodeURIComponent(layerFields[i] || 'Layer')
     const visible = layerFields[i + 1] !== '0'
     const gridStr = layerFields[i + 2] || ''
+    if (gridStr.startsWith(FREEHAND_MARKER)) {
+      layers.push({ id: createLayerId(), name, visible, grid: {}, type: 'freehand', strokes: decodeStrokes(gridStr, allColors) })
+      continue
+    }
     const grid: { [key: string]: string } = {}
     if (gridStr) {
       // Bounded split - see the identical comment in deserializeV1 above.
@@ -376,6 +402,60 @@ function deserializeV2(parts: string[]): DrawingData | null {
     layers,
     activeLayerIndex: clampActiveLayerIndex(activeLayerIndexRaw, layers.length),
   }
+}
+
+// Marks a v2 layer's grid field as holding freehand strokes - see the format
+// notes on serializeDrawing. '~' is never the first character of a pixel
+// layer's grid field (those start with a row number), and isn't touched by
+// the URI-encoding, ';' or '|' separators.
+const FREEHAND_MARKER = '~'
+
+function encodeStroke(stroke: Stroke, colorIndex: number | undefined): string {
+  const hundredths = (value: number) => Math.round(value * 100)
+  const fields = [colorIndex, hundredths(stroke.width)]
+  let prevX = 0
+  let prevY = 0
+  for (let i = 0; i + 1 < stroke.points.length; i += 2) {
+    const x = hundredths(stroke.points[i])
+    const y = hundredths(stroke.points[i + 1])
+    fields.push(x - prevX, y - prevY)
+    prevX = x
+    prevY = y
+  }
+  return fields.join(',')
+}
+
+// Reads a freehand layer's grid field back into strokes. A malformed entry
+// (unknown palette index, non-numeric field, no points) is dropped on its own
+// rather than failing the layer, like an unknown cell color; coordinates and
+// widths are then bounded by normalizeDrawingData.
+function decodeStrokes(field: string, allColors: { [key: string]: string }): Stroke[] {
+  // Bounded splits throughout - see the identical comments in deserializeV2.
+  // The first entry is the marker itself; the rest are strokes.
+  const entries = field.split(';', MAX_STROKES_PER_LAYER + 1)
+  const strokes: Stroke[] = []
+  // colorIndex + width + (x, y) per point; the cap keeps the even field
+  // count (2 + 2 per point) a stroke always has.
+  const maxFields = 2 + MAX_POINTS_PER_STROKE * 2
+  for (let i = 1; i < entries.length; i++) {
+    const fields = entries[i].split(',', maxFields + 1)
+    const count = Math.min(fields.length, maxFields)
+    if (count < 4 || count % 2 !== 0) continue
+    const color = allColors[fields[0]]
+    if (!color) continue
+    const width = Number(fields[1]) / 100
+    let x = Number(fields[2])
+    let y = Number(fields[3])
+    const points = [x / 100, y / 100]
+    for (let k = 4; k + 1 < count; k += 2) {
+      x += Number(fields[k])
+      y += Number(fields[k + 1])
+      points.push(x / 100, y / 100)
+    }
+    if (!Number.isFinite(width) || points.some((v) => !Number.isFinite(v))) continue
+    strokes.push({ color, width, points })
+  }
+  return strokes
 }
 
 // Resolves a v2 grid entry's value - a single palette index, or a half-pixel's

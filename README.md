@@ -8,12 +8,29 @@ A pixel art drawing app for creating patterns. Draw on a customizable matrix wit
 - Customizable pixel size
 - Color picker and saved color palette
 - Click/tap to draw
+- Layers, including freehand layers for drawing smooth lines by hand
 - Save to local storage
 - Share drawings via URL
 - Download/print functionality
 - User authentication (Google OAuth and email/password)
 - User accounts for saving patterns
 - Analytics and session replay with PostHog (optional)
+
+## Freehand Layers
+
+Besides pixel layers, a drawing can have freehand layers (**+ Freehand** in the layers panel). On one, the pencil draws smooth lines in the selected color, and the line width is set from the menu next to the pencil (or with `[` and `]`). Widths are measured in grid cells, so a line keeps its proportions when the pixel size changes.
+
+- **Eraser** removes whole strokes it touches.
+- **Select** works on the strokes inside the selected area: move, copy, cut, paste, mirror and delete. Strokes are cut at the edge of the selection. Strokes and pixels can't be pasted onto each other's layers.
+- **Color picker** reads stroke colors too.
+- **Fill** is not available on a freehand layer, and a freehand layer can only be merged down into another freehand layer.
+- Freehand layers can sit anywhere in the stack; layers above one are drawn over the grid on a canvas so the stacking order stays correct. Downloads and the saved-drawings previews include them.
+
+### Saved format
+
+Existing drawings are unaffected: pixel layers serialize exactly as before, so everything saved or shared by an earlier version still loads, and a drawing without freehand layers produces the same compact string it always did.
+
+A freehand layer is stored in the same compact `v2` string as any other layer (three `|`-separated fields: name, visibility, content), with content `~;stroke;stroke;...`. The leading `~` marks the layer type and is present even when the layer has no strokes. Each stroke is `colorIndex,width,x0,y0,dx1,dy1,...`: an index into the drawing's shared color palette, then integers in hundredths of a grid cell (the line width, the first point, and each later point as an offset from the previous one). Because stroke entries contain no `:`, an older client that doesn't know about freehand layers skips them and shows an empty layer instead of failing to load the drawing. In JSON (local storage and the save API) a freehand layer is `{ ..., "type": "freehand", "strokes": [{ "color", "width", "points": [x0, y0, x1, y1, ...] }] }`; pixel layers have no `type` field. The format is documented in `lib/serialization.ts` and the limits on strokes in `lib/strokes.ts`.
 
 ## Getting Started
 

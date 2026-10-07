@@ -22,13 +22,37 @@ export interface ClipboardData {
   // key = "relRow,relCol" relative to the selection's top-left corner.
   // A value of TRANSPARENT means the cell was empty when copied.
   cells: { [key: string]: string }
+  // Present only when copied from a freehand layer (cells is then empty):
+  // the strokes inside the selection, relative to its top-left corner.
+  strokes?: Stroke[]
+}
+
+// A single freehand pen stroke. Everything is measured in grid cells (not
+// screen pixels) so a stroke keeps its place and proportions when the pixel
+// size changes: (0, 0) is the canvas's top-left corner and (canvasWidth,
+// canvasHeight) its bottom-right, and `width` is the line thickness in cells.
+// Values are quantized to two decimals (see lib/strokes.ts) so they survive
+// the compact serialization exactly.
+export interface Stroke {
+  color: string
+  width: number
+  // Flat [x0, y0, x1, y1, ...] polyline. A single point is a dot.
+  points: number[]
 }
 
 export interface Layer {
   id: string
   name: string
   visible: boolean
+  // Pixel layers paint into `grid`. Freehand layers keep it as an empty
+  // object so code that only knows about grids (history cost, merging,
+  // resizing) keeps working, and carry their content in `strokes` instead.
   grid: { [key: string]: string }
+  // Absent (not 'pixel') on pixel layers - that is what every drawing saved
+  // before freehand layers existed looks like, and omitting it keeps their
+  // JSON byte-for-byte unchanged.
+  type?: 'freehand'
+  strokes?: Stroke[]
 }
 
 export interface DrawingData {

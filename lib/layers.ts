@@ -1,5 +1,15 @@
-import type { DrawingData, Layer, MatrixPattern } from './types'
+import type { DrawingData, Layer, MatrixPattern, Stroke } from './types'
 import { compositeCell, normalizeCellValue } from './cells'
+import {
+  canvasBounds,
+  countStrokePoints,
+  quantize,
+  quantizeWidth,
+  MAX_POINTS_PER_LAYER,
+  MAX_POINTS_PER_STROKE,
+  MAX_STROKES_PER_LAYER,
+} from './strokes'
+import type { Box } from './strokes'
 
 let layerIdCounter = 0
 export function createLayerId(): string {
@@ -13,6 +23,16 @@ export function createLayer(name: string, grid: { [key: string]: string } = {}):
 
 export function createDefaultLayers(): Layer[] {
   return [createLayer('Layer 1')]
+}
+
+export function isFreehandLayer(layer: Layer | undefined): boolean {
+  return layer?.type === 'freehand'
+}
+
+// A layer that holds pen strokes instead of painted cells. Its grid stays an
+// empty object (see Layer) so grid-only code never has to special-case it.
+export function createFreehandLayer(name: string, strokes: Stroke[] = []): Layer {
+  return { id: createLayerId(), name, visible: true, grid: {}, type: 'freehand', strokes }
 }
 
 // Composites visible layers bottom-to-top into a single flat grid, e.g. for
@@ -52,20 +72,49 @@ export function clampActiveLayerIndex(index: number, layerCount: number): number
   return Math.max(0, Math.min(safeIndex, layerCount - 1))
 }
 
+// Whether the layer with `sourceId` can be merged into the one below it: it
+// must be visible (see mergeLayerDown) and the same kind as the layer
+// beneath - strokes can't be folded into a grid of cells or the reverse
+// without rasterizing them - and the combined strokes must still fit the
+// per-layer bound normalizeDrawingData enforces, or the overflow would be
+// silently dropped on the next save.
+export function canMergeLayerDown(layers: Layer[], sourceId: string): boolean {
+  const index = layers.findIndex((l) => l.id === sourceId)
+  if (index <= 0) return false
+  const source = layers[index]
+  const target = layers[index - 1]
+  if (!source.visible) return false
+  if (isFreehandLayer(source) !== isFreehandLayer(target)) return false
+  if (isFreehandLayer(source)) {
+    // Counted rather than concatenated: the layers list asks this for every
+    // row on every render.
+    const below = target.strokes ?? []
+    const above = source.strokes ?? []
+    return below.length + above.length <= MAX_STROKES_PER_LAYER && countStrokePoints(below) + countStrokePoints(above) <= MAX_POINTS_PER_LAYER
+  }
+  return true
+}
+
 // Merges the layer with `sourceId` into the layer directly below it. The
 // merged layer is always left visible: merging only ever starts from a
 // visible source (see the early return below, which mirrors the UI's own
 // merge-down availability rule), so spreading the *target*'s own `visible`
 // into the result would silently hide content that was on-screen a moment
 // before the merge whenever the target underneath happened to be hidden.
-// Returns `layers` unchanged if the merge isn't valid (no id match, already
-// the bottom layer, or the source itself is hidden).
+// Returns `layers` unchanged if the merge isn't valid (see canMergeLayerDown).
 export function mergeLayerDown(layers: Layer[], sourceId: string): Layer[] {
+  if (!canMergeLayerDown(layers, sourceId)) return layers
   const index = layers.findIndex((l) => l.id === sourceId)
-  if (index <= 0) return layers
   const source = layers[index]
-  if (!source.visible) return layers
   const target = layers[index - 1]
+
+  if (isFreehandLayer(source)) {
+    // The source's strokes go on top of the target's, as they were on screen.
+    const mergedStrokes = [...(target.strokes ?? []), ...(source.strokes ?? [])]
+    return layers
+      .filter((_, i) => i !== index)
+      .map((l) => (l.id === target.id ? { ...target, strokes: mergedStrokes, visible: true } : l))
+  }
 
   const mergedGrid = { ...target.grid }
   for (const key in source.grid) {
@@ -279,6 +328,46 @@ function normalizeColors(rawColors: unknown): { [key: string]: string } {
   return colors
 }
 
+// Validates a freehand layer's raw strokes (from localStorage, an API
+// request, or a decoded share link). Each stroke needs a valid color, a
+// finite width and a polyline of finite numbers; anything else is dropped,
+// the same drop-don't-guess policy as normalizeLayerGrid. Coordinates are
+// clamped onto the canvas (a stroke running to the edge is legitimate, and
+// clamping keeps it there instead of discarding it) and quantized to the
+// precision the compact format stores. Every loop is bounded by a count cap
+// *and* the raw-scan cap, for the same reasons as normalizeLayerGrid.
+function normalizeStrokes(rawStrokes: unknown, bounds: Box): Stroke[] {
+  const strokes: Stroke[] = []
+  if (!Array.isArray(rawStrokes)) return strokes
+  let totalPoints = 0
+  const scanLimit = Math.min(rawStrokes.length, MAX_RAW_ENTRIES_TO_SCAN)
+  for (let i = 0; i < scanLimit && strokes.length < MAX_STROKES_PER_LAYER && totalPoints < MAX_POINTS_PER_LAYER; i++) {
+    const raw = rawStrokes[i]
+    if (!raw || typeof raw !== 'object') continue
+    const { color, width, points } = raw as Record<string, unknown>
+    const normalizedColor = typeof color === 'string' ? normalizeHexColor(color) : null
+    if (!normalizedColor || typeof width !== 'number' || !Number.isFinite(width) || !Array.isArray(points)) continue
+
+    const pointCount = Math.min(Math.floor(points.length / 2), MAX_POINTS_PER_STROKE, MAX_POINTS_PER_LAYER - totalPoints)
+    if (pointCount < 1) continue
+    const flat: number[] = []
+    for (let k = 0; k < pointCount * 2; k++) {
+      const value = points[k]
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        flat.length = 0
+        break
+      }
+      const low = k % 2 === 0 ? bounds.x0 : bounds.y0
+      const high = k % 2 === 0 ? bounds.x1 : bounds.y1
+      flat.push(quantize(Math.max(low, Math.min(high, value))))
+    }
+    if (flat.length === 0) continue
+    totalPoints += pointCount
+    strokes.push({ color: normalizedColor, width: quantizeWidth(width), points: flat })
+  }
+  return strokes
+}
+
 // The top-level keys normalizeDrawingData actually reads (current-format,
 // legacy pre-layers format, or any partial subset of either - every field
 // has a safe default, so a payload only needs to carry one of these to be
@@ -308,6 +397,7 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
   const canvasWidth = normalizeCanvasDimension(data.canvasWidth, 20)
   const canvasHeight = normalizeCanvasDimension(data.canvasHeight, 20)
   const colors = normalizeColors(data.colors)
+  const bounds = canvasBounds(pattern, canvasWidth, canvasHeight)
 
   let layers: Layer[]
   if (Array.isArray(data.layers) && data.layers.length > 0) {
@@ -327,12 +417,14 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
       let id = typeof layer.id === 'string' && layer.id ? layer.id : createLayerId()
       if (seenIds.has(id)) id = createLayerId()
       seenIds.add(id)
-      return {
-        id,
-        name: normalizeLayerName(layer.name),
-        visible: layer.visible !== false,
-        grid: normalizeLayerGrid(layer.grid, canvasWidth, canvasHeight),
+      const base = { id, name: normalizeLayerName(layer.name), visible: layer.visible !== false }
+      // Anything that isn't explicitly a freehand layer is a pixel layer -
+      // which is every layer saved before freehand layers existed, and any
+      // layer with an unrecognized `type` from a newer/other version.
+      if (layer.type === 'freehand') {
+        return { ...base, grid: {}, type: 'freehand' as const, strokes: normalizeStrokes(layer.strokes, bounds) }
       }
+      return { ...base, grid: normalizeLayerGrid(layer.grid, canvasWidth, canvasHeight) }
     })
   } else {
     layers = migrateGridToLayers(normalizeLayerGrid(data.grid, canvasWidth, canvasHeight))
@@ -360,5 +452,7 @@ export function normalizeDrawingData(raw: unknown): DrawingData {
 export const MAX_TOTAL_GRID_ENTRIES = 2_000_000
 
 export function totalGridEntryCount(data: DrawingData): number {
-  return data.layers.reduce((sum, layer) => sum + Object.keys(layer.grid).length, 0)
+  // A stroke point costs about what a painted cell does to serialize and
+  // keep in the undo history, so they share the same aggregate budget.
+  return data.layers.reduce((sum, layer) => sum + Object.keys(layer.grid).length + countStrokePoints(layer.strokes ?? []), 0)
 }

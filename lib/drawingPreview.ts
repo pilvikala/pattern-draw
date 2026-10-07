@@ -1,6 +1,7 @@
 import type { DrawingData } from '@/lib/types'
 import { compositeLayers } from '@/lib/layers'
 import { drawCell } from '@/lib/cells'
+import { drawOverlayLayers, splitRenderLayers } from '@/lib/freehandRender'
 
 /**
  * Generates a data URL for a drawing preview image
@@ -17,7 +18,10 @@ export function generateDrawingPreview(
     if (!ctx) return ''
 
     const { pattern, pixelSize, canvasWidth, canvasHeight, layers } = drawingData
-    const grid = compositeLayers(layers)
+    // Layers from the lowest visible freehand layer up are drawn over the
+    // grid afterwards (see splitRenderLayers); everything below is flattened.
+    const { base, overlay } = splitRenderLayers(layers)
+    const grid = compositeLayers(base)
 
     // Calculate scale to fit within maxSize
     const cols = canvasWidth
@@ -72,6 +76,13 @@ export function generateDrawingPreview(
                 ctx.strokeRect(x, y, pixelSize, pixelSize)
             }
         }
+    }
+
+    if (overlay.length > 0) {
+        ctx.save()
+        ctx.scale(pixelSize, pixelSize)
+        drawOverlayLayers(ctx, overlay, { pattern, pixelSize, gridLines: scale > 0.3 })
+        ctx.restore()
     }
 
     return canvas.toDataURL('image/png')

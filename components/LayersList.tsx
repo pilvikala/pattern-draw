@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { Layer } from '@/lib/types'
-import { MAX_LAYER_NAME_LENGTH } from '@/lib/layers'
+import { MAX_LAYER_NAME_LENGTH, canMergeLayerDown, isFreehandLayer } from '@/lib/layers'
+import { FreehandLayerIcon } from './icons'
 import styles from './LayersList.module.css'
 
 export interface LayersListProps {
@@ -11,6 +12,8 @@ export interface LayersListProps {
   canAddLayer: boolean
   onSelectLayer: (id: string) => void
   onAddLayer: () => void
+  // Adds a layer for drawing lines by hand instead of painting cells.
+  onAddFreehandLayer: () => void
   onDeleteLayer: (id: string) => void
   onRenameLayer: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
@@ -24,6 +27,7 @@ export default function LayersList({
   canAddLayer,
   onSelectLayer,
   onAddLayer,
+  onAddFreehandLayer,
   onDeleteLayer,
   onRenameLayer,
   onToggleVisibility,
@@ -88,21 +92,37 @@ export default function LayersList({
 
   return (
     <div className={styles.layersList}>
-      <button
-        onClick={onAddLayer}
-        className={styles.addButton}
-        disabled={!canAddLayer}
-        title={canAddLayer ? undefined : 'Maximum number of layers reached'}
-      >
-        + Add Layer
-      </button>
+      <div className={styles.addButtons}>
+        <button
+          onClick={onAddLayer}
+          className={styles.addButton}
+          disabled={!canAddLayer}
+          title={canAddLayer ? 'Add a pixel layer' : 'Maximum number of layers reached'}
+        >
+          + Add Layer
+        </button>
+        <button
+          onClick={onAddFreehandLayer}
+          className={styles.addButton}
+          disabled={!canAddLayer}
+          title={canAddLayer ? 'Add a layer for drawing lines freehand' : 'Maximum number of layers reached'}
+        >
+          + Freehand
+        </button>
+      </div>
 
       <ul className={styles.rows}>
         {rows.map(({ layer, index }) => {
           const isActive = layer.id === activeLayerId
           const canMoveUp = index < layers.length - 1
           const canMoveDown = index > 0
-          const canMergeDown = index > 0 && layer.visible
+          const canMergeDown = canMergeLayerDown(layers, layer.id)
+          const isFreehand = isFreehandLayer(layer)
+          const mergeTitle = canMergeDown
+            ? 'Merge into layer below'
+            : index > 0 && layer.visible && isFreehand !== isFreehandLayer(layers[index - 1])
+              ? "Freehand and pixel layers can't be merged"
+              : 'Merge into layer below'
           const canDelete = layers.length > 1
 
           return (
@@ -128,6 +148,12 @@ export default function LayersList({
                   </svg>
                 )}
               </button>
+
+              {isFreehand && (
+                <span className={styles.typeIcon} title="Freehand layer" role="img" aria-label="Freehand layer">
+                  <FreehandLayerIcon className={styles.typeIconSvg} />
+                </span>
+              )}
 
               {editingId === layer.id ? (
                 <input
@@ -205,7 +231,7 @@ export default function LayersList({
                   disabled={!canMergeDown}
                   onClick={() => onMergeDown(layer.id)}
                   aria-label="Merge down"
-                  title="Merge into layer below"
+                  title={mergeTitle}
                 >
                   ⇩
                 </button>
