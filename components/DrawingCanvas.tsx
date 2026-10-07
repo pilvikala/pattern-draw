@@ -60,15 +60,21 @@ interface RulerProps {
   pixelSize: number
   step: number
   orientation: 'horizontal' | 'vertical'
+  // Which edge of the grid the ruler sits on: top/left or bottom/right.
+  side: 'start' | 'end'
 }
 
 // Row/column numbers shown alongside the grid. Numbers are 1-based, as
 // people count rows when following a pattern, and sit in the same
 // pixelSize-wide tracks as the cells so they line up (and zoom) with them.
-const Ruler = memo(function Ruler({ count, pixelSize, step, orientation }: RulerProps) {
+const Ruler = memo(function Ruler({ count, pixelSize, step, orientation, side }: RulerProps) {
   const isHorizontal = orientation === 'horizontal'
+  const rulerClass = [
+    isHorizontal ? styles.colRuler : styles.rowRuler,
+    side === 'end' ? styles.rulerEnd : '',
+  ].join(' ')
   return (
-    <div className={isHorizontal ? styles.colRuler : styles.rowRuler} aria-hidden="true">
+    <div className={rulerClass} aria-hidden="true">
       {Array.from({ length: count }).map((_, i) => {
         const n = i + 1
         return (
@@ -854,18 +860,33 @@ export default function DrawingCanvas({
         }}
       >
         <div className={styles.rulerLayout}>
-          <div className={styles.rulerCorner} />
           <Ruler
             count={dimensions.cols}
             pixelSize={pixelSize}
             step={colLabelStep}
             orientation="horizontal"
+            side="start"
           />
           <Ruler
             count={dimensions.rows}
             pixelSize={pixelSize}
             step={rowLabelStep}
             orientation="vertical"
+            side="start"
+          />
+          <Ruler
+            count={dimensions.cols}
+            pixelSize={pixelSize}
+            step={colLabelStep}
+            orientation="horizontal"
+            side="end"
+          />
+          <Ruler
+            count={dimensions.rows}
+            pixelSize={pixelSize}
+            step={rowLabelStep}
+            orientation="vertical"
+            side="end"
           />
           <div
             ref={containerRef}
