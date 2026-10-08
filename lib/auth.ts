@@ -6,6 +6,10 @@ import { prisma } from './prisma'
 import bcrypt from 'bcryptjs'
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  // Derive the auth URL (incl. OAuth callback) from the request's Host / X-Forwarded-Host
+  // so sign-in works on every domain the app is served from. This only takes effect
+  // when NEXTAUTH_URL / AUTH_URL is NOT set – those pin all auth traffic to one origin.
+  trustHost: true,
   adapter: PrismaAdapter(prisma) as any,
   providers: [
     Google({
