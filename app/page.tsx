@@ -96,6 +96,8 @@ function HomeContent() {
   // momentary, unlike fill/draw which stay selected until changed.
   const previousToolRef = useRef<Tool>('draw')
   const [selection, setSelection] = useState<SelectionRect | null>(null)
+  // A line has been started with the line tool; Escape then cancels it.
+  const [isLineActive, setIsLineActive] = useState(false)
   const [clipboard, setClipboard] = useState<ClipboardData | null>(null)
   const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -776,9 +778,9 @@ function HomeContent() {
           handlePaste()
         }
       } else if (e.key === 'Escape') {
-        // While drawing a line, Escape belongs to the line (the canvas cancels
-        // it before this runs), not to the selection.
-        if (selection) {
+        // While a line is in progress, Escape belongs to the line (the canvas
+        // cancels it), not to the selection.
+        if (selection && !isLineActive) {
           e.preventDefault()
           handleDeselect()
         }
@@ -818,7 +820,7 @@ function HomeContent() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [tool, activeIsFreehand, selection, clipboard, handleUndo, handleRedo, handleMirror, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleLineModeSelect, handleEraseModeToggle, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
+  }, [tool, activeIsFreehand, isLineActive, selection, clipboard, handleUndo, handleRedo, handleMirror, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleLineModeSelect, handleEraseModeToggle, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
 
   // The color a viewer sees at a spot: the topmost visible layer that has
   // paint there - a cell's color (the half under the pointer, for a
@@ -1570,6 +1572,7 @@ function HomeContent() {
                 onSelectionMoveEnd={handleSelectionMoveEnd}
                 onStrokeCommit={handleStrokeCommit}
                 onLineCommit={handleLineCommit}
+                onLineActiveChange={setIsLineActive}
                 onStrokeErase={handleStrokeErase}
               />
             </div>

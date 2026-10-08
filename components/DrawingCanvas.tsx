@@ -155,6 +155,8 @@ interface DrawingCanvasProps {
   onStrokeErase: (x: number, y: number, radius: number) => void
   // A finished line on a pixel layer: the "row,col" keys of the cells it covers.
   onLineCommit: (keys: string[]) => void
+  // Whether a line has been started and not yet finished or cancelled.
+  onLineActiveChange: (active: boolean) => void
 }
 
 export default function DrawingCanvas({
@@ -177,6 +179,7 @@ export default function DrawingCanvas({
   onStrokeCommit,
   onStrokeErase,
   onLineCommit,
+  onLineActiveChange,
 }: DrawingCanvasProps) {
   const isColorPickerMode = tool === 'colorPicker'
   const isFillMode = tool === 'fill'
@@ -593,18 +596,25 @@ export default function DrawingCanvas({
     clearLine()
   }, [activeLayerId, pattern, canvasWidth, canvasHeight, clearLine])
 
-  // Escape cancels the line in progress. Captured, so it doesn't also reach
-  // the editor's own Escape handling (which deselects).
+  // Tells the editor a line is in progress, so its own Escape handling
+  // (deselecting) leaves Escape to the line.
+  useEffect(() => {
+    onLineActiveChange(isLineActive)
+  }, [isLineActive, onLineActiveChange])
+
+  // Escape cancels the line in progress. Not captured, so menus, dialogs and
+  // text fields (which handle their own Escape first) are never pre-empted.
   useEffect(() => {
     if (!isLineActive) return
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
       e.preventDefault()
-      e.stopPropagation()
       clearLine()
     }
-    window.addEventListener('keydown', handleKeyDown, true)
-    return () => window.removeEventListener('keydown', handleKeyDown, true)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isLineActive, clearLine])
 
   const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
