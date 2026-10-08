@@ -249,7 +249,12 @@ function HomeContent() {
     // Whatever is loaded here (localStorage restore, share link, saved drawing)
     // is the baseline: autosave waits for the user's first edit instead of
     // saving content they never touched as a new drawing.
-    lastPersistedRef.current = JSON.stringify(normalizeDrawingData(data))
+    // Colors are re-indexed the way buildDrawingData does, so the baseline
+    // matches it even for data with non-contiguous color keys.
+    lastPersistedRef.current = JSON.stringify(normalizeDrawingData({
+      ...data,
+      colors: Object.fromEntries(Object.values(data.colors || {}).map((c, i) => [String(i), c])),
+    }))
     setPattern(data.pattern)
     setPixelSize(data.pixelSize)
     setCanvasWidth(data.canvasWidth)
@@ -1077,6 +1082,8 @@ function HomeContent() {
     const interval = setInterval(async () => {
       const { buildDrawingData: build, currentDrawingId: id, isSaving: saving, isSavingCopy: savingCopy, router: r } = autosaveStateRef.current
       if (saving || savingCopy || autosaveInFlightRef.current) return
+      // Defense in depth: the id goes into a fetch path, so never use an invalid one.
+      if (id && !isValidDrawingId(id)) return
       // A ?id= drawing is still loading (or failed to): the canvas holds
       // unrelated local content, so don't persist it as a new drawing.
       const urlId = new URLSearchParams(window.location.search).get('id')
