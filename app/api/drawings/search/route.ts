@@ -41,7 +41,7 @@ function trackSearch(userId: string, query: string): void {
     }).catch((err) => console.error('Search analytics failed:', err))
 }
 
-// POST /api/drawings/search - Find the user's drawings whose saved data contains a text fragment
+// POST /api/drawings/search - Find the user's drawings by layer name text
 export async function POST(request: NextRequest) {
     try {
         const session = await auth()
@@ -67,10 +67,15 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Query is required' }, { status: 400 })
         }
 
+        // The search runs on the serialized drawing string (see serializeDrawing
+        // in lib/serialization.ts), whose only human-readable text is the layer
+        // names, stored URI-encoded. Encoding the query the same way lets
+        // "Layer 1" match "Layer%201" and keeps delimiters like '|', ';' and
+        // ':' in a query from lining up with the grid/color structure.
         const drawings = await prisma.drawing.findMany({
             where: {
                 ownerId: session.user.id,
-                drawing: { contains: query, mode: 'insensitive' },
+                drawing: { contains: encodeURIComponent(query), mode: 'insensitive' },
             },
             orderBy: { updatedAt: 'desc' },
             select: { id: true, createdAt: true, updatedAt: true },
