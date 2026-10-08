@@ -4,7 +4,7 @@ import { Suspense } from 'react'
 import Link from 'next/link'
 import { KuvioLogo } from '@/components/KuvioLogo'
 import { SignInForm } from './SignInForm'
-import styles from './auth.module.css'
+import styles from '../auth.module.css'
 
 function SignInFallback() {
   return (

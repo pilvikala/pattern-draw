@@ -5,7 +5,7 @@ import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { KuvioLogo } from '@/components/KuvioLogo'
-import styles from './auth.module.css'
+import styles from '../auth.module.css'
 
 export default function SignUpPage() {
   const router = useRouter()
@@ -161,7 +161,7 @@ export default function SignUpPage() {
             disabled={isLoading}
             className={styles.submitButton}
           >
-            {isLoading ? 'Creating account...' : 'Sign Up'}
+            {isLoading ? 'Creating account...' : 'Sign up'}
           </button>
         </form>
 
