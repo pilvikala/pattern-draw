@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'rea
 import { useSession, getSession, signOut } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import DrawingCanvas from '@/components/DrawingCanvas'
+import { GridIcon } from '@/components/icons'
 import ColorPicker from '@/components/ColorPicker'
 import CompactColorPicker from '@/components/CompactColorPicker'
 import ColorPalette from '@/components/ColorPalette'
@@ -113,6 +114,9 @@ function HomeContent() {
   // slow autosave response for the previous drawing is discarded, not applied.
   const drawingGenerationRef = useRef(0)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
+  // View-only: hides the lines between cells so the pattern can be seen as
+  // it will look finished. Not part of the drawing or its history.
+  const [showGrid, setShowGrid] = useState(true)
   const [showNewDrawingModal, setShowNewDrawingModal] = useState(false)
 
   // Undo/Redo history - each entry is a full snapshot of the layer stack
@@ -1478,6 +1482,15 @@ function HomeContent() {
                   </button>
                 </div>
               )}
+              <button
+                onClick={() => setShowGrid((v) => !v)}
+                className={`${styles.undoRedoButton} ${!showGrid ? styles.gridHidden : ''}`}
+                aria-label={showGrid ? 'Hide grid' : 'Show grid'}
+                aria-pressed={!showGrid}
+                title={showGrid ? 'Hide grid' : 'Show grid'}
+              >
+                <GridIcon className={styles.gridToggleIcon} />
+              </button>
             </div>
             <div className={styles.headerRight}>
               <UserMenu />
@@ -1568,6 +1581,7 @@ function HomeContent() {
                 onLineCommit={handleLineCommit}
                 onLineActiveChange={setIsLineActive}
                 onStrokeErase={handleStrokeErase}
+                showGrid={showGrid}
               />
             </div>
           </div>

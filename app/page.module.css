@@ -74,6 +74,26 @@
   cursor: not-allowed;
 }
 
+.gridToggleIcon {
+  width: 20px;
+  height: 20px;
+}
+
+/* The grid toggle while the grid is hidden: the icon is struck through. */
+.undoRedoButton.gridHidden {
+  position: relative;
+  color: #888;
+}
+
+.undoRedoButton.gridHidden::after {
+  content: '';
+  position: absolute;
+  width: 26px;
+  height: 2px;
+  background: currentColor;
+  transform: rotate(-45deg);
+}
+
 .title {
   font-size: 1.25rem;
   margin: 0;
