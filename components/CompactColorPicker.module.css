@@ -5,13 +5,13 @@
   padding: 0.5rem;
   background: white;
   border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgba(27, 31, 42, 0.1);
 }
 
 .colorPreview {
   width: 48px;
   height: 48px;
-  border: 2px solid #ddd;
+  border: 2px solid var(--color-border);
   border-radius: 8px;
   cursor: pointer;
   flex-shrink: 0;
@@ -30,7 +30,7 @@
   width: 40px;
   height: 40px;
   border-radius: 8px;
-  border: 2px solid #ddd;
+  border: 2px solid var(--color-border);
   background: white;
   font-size: 1.2rem;
   cursor: pointer;
@@ -43,13 +43,13 @@
 
 .saveButton:hover,
 .pickerButton:hover {
-  background: #f5f5f5;
-  border-color: #0070f3;
+  background: var(--color-lumi);
+  border-color: var(--color-accent);
 }
 
 .pickerButton.active {
-  background: #ff6b6b;
-  border-color: #ff6b6b;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
   color: white;
   animation: pulse 1s infinite;
 }
@@ -61,7 +61,7 @@
 
 .pickerButton:disabled:hover {
   background: white;
-  border-color: #ddd;
+  border-color: var(--color-border);
 }
 
 .pickerIcon {
@@ -85,13 +85,13 @@
   display: flex;
   gap: 2px;
   padding: 2px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   flex-shrink: 0;
 }
 
 .pickerButton.modeActive {
-  background: #e6f0ff;
-  border-color: #0070f3;
-  color: #0070f3;
+  background: var(--color-accent-tint);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }

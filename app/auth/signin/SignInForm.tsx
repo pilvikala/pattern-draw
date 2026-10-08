@@ -62,7 +62,7 @@ export function SignInForm() {
 
   return (
     <>
-      <h1 className={styles.title}>Sign In</h1>
+      <h1 className={styles.title}>Sign in</h1>
       <p className={styles.subtitle}>Sign in to your account to continue</p>
 
       {error && <div className={styles.error}>{error}</div>}

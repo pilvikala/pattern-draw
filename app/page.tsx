@@ -5,6 +5,7 @@ import { useSession, getSession, signOut } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import DrawingCanvas from '@/components/DrawingCanvas'
 import { GridIcon } from '@/components/icons'
+import { KuvioLogo } from '@/components/KuvioLogo'
 import ColorPicker from '@/components/ColorPicker'
 import CompactColorPicker from '@/components/CompactColorPicker'
 import ColorPalette from '@/components/ColorPalette'
@@ -45,6 +46,9 @@ export type { MatrixPattern, DrawingData } from '@/lib/types'
 // A drawing shared as a URL becomes unwieldy (and risks silent truncation by
 // chat apps, SMS, older proxies, etc.) past roughly this many characters.
 const SAFE_SHARE_URL_LENGTH = 2000
+
+const LOCAL_STORAGE_KEY = 'kuvio-data'
+const LEGACY_LOCAL_STORAGE_KEY = 'pattern-draw-data'
 
 // The line-width slider's range and step, in cells. Pixel size scales it, so
 // the same width looks right on any canvas zoom; loaded drawings may carry
@@ -282,7 +286,9 @@ function HomeContent() {
 
   // Load from local storage on mount
   useEffect(() => {
-    const saved = localStorage.getItem('pattern-draw-data')
+    // Fall back to the key used before the rename to Kuvio, so a drawing in
+    // progress survives the upgrade; the next save writes the new key.
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY) ?? localStorage.getItem(LEGACY_LOCAL_STORAGE_KEY)
     if (saved) {
       try {
         applyLoadedDrawing(normalizeDrawingData(JSON.parse(saved)))
@@ -394,7 +400,8 @@ function HomeContent() {
       // silently rather than surfacing an error for something the user
       // didn't explicitly ask for.
       if (totalGridEntryCount(data) > MAX_TOTAL_GRID_ENTRIES) return
-      localStorage.setItem('pattern-draw-data', JSON.stringify(data))
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data))
+      localStorage.removeItem(LEGACY_LOCAL_STORAGE_KEY)
     } catch (e) {
       console.error('Failed to save to localStorage', e)
     }
@@ -1087,7 +1094,7 @@ function HomeContent() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = 'pattern-draw.png'
+        a.download = 'kuvio.png'
         a.click()
         URL.revokeObjectURL(url)
       }
@@ -1449,7 +1456,7 @@ function HomeContent() {
         <div className={styles.leftSection}>
           <div className={styles.header}>
             <div className={styles.titleContainer}>
-              <h1 className={styles.title}>Pattern Draw</h1>
+              <h1 className={styles.title}><KuvioLogo /></h1>
               {(history.length > 1 || historyIndex < history.length - 1) && (
                 <div className={styles.undoRedoButtons}>
                   <button

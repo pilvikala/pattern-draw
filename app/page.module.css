@@ -20,7 +20,7 @@
   align-items: center;
   padding: 0.75rem 1rem;
   background: white;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
   position: relative;
   z-index: 100;
@@ -51,22 +51,22 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f0f0f0;
-  border: 1px solid #ddd;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   cursor: pointer;
-  color: #333;
+  color: var(--color-text);
   transition: all 0.2s;
   padding: 0;
 }
 
 .undoRedoButton:hover:not(:disabled) {
-  background: #e0e0e0;
-  border-color: #bbb;
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-input);
 }
 
 .undoRedoButton:active:not(:disabled) {
-  background: #d0d0d0;
+  background: var(--color-border-strong);
 }
 
 .undoRedoButton:disabled {
@@ -82,7 +82,7 @@
 /* The grid toggle while the grid is hidden: the icon is struck through. */
 .undoRedoButton.gridHidden {
   position: relative;
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 .undoRedoButton.gridHidden::after {
@@ -95,16 +95,16 @@
 }
 
 .title {
-  font-size: 1.25rem;
+  display: flex;
+  font-size: 1.375rem;
   margin: 0;
-  color: #333;
-  font-weight: 600;
+  color: var(--color-text);
 }
 
 .topBar {
   padding: 0.75rem 1rem;
-  background: #f9f9f9;
-  border-bottom: 1px solid #eee;
+  background: var(--color-lumi);
+  border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -233,9 +233,7 @@
   }
 
   .title {
-    font-size: 2.5rem;
-    text-align: center;
-    margin-bottom: 2rem;
+    font-size: 2rem;
     margin: 0;
   }
 
@@ -248,7 +246,7 @@
     padding: 2rem;
     background: white;
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgba(27, 31, 42, 0.1);
     margin: 2rem;
     overflow: auto;
     display: flex;
@@ -272,7 +270,7 @@
     display: block;
     flex: 0 0 30%;
     background: white;
-    border-left: 1px solid #eee;
+    border-left: 1px solid var(--color-border);
     padding: 1rem;
     position: relative;
     height: 100vh;
@@ -299,16 +297,16 @@
     width: 40px;
     height: 40px;
     background: white;
-    border: 1px solid #ddd;
+    border: 1px solid var(--color-border);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 4px rgba(27, 31, 42, 0.1);
     z-index: 1000;
     transition: right 0.3s ease, transform 0.2s ease, box-shadow 0.2s ease;
-    color: #333;
+    color: var(--color-text);
     pointer-events: auto;
   }
 
@@ -319,12 +317,12 @@
   .panelToggle.collapsed:hover {
     right: 5px;
     transform: translateY(-50%) scale(1.1);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 12px rgba(27, 31, 42, 0.2);
   }
 
   .panelToggle:hover {
-    background: #f5f5f5;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    background: var(--color-lumi);
+    box-shadow: 0 2px 6px rgba(27, 31, 42, 0.15);
   }
 
   .panelContent {
@@ -381,7 +379,7 @@
 .modalOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--color-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -392,7 +390,7 @@
   background: white;
   border-radius: 12px;
   padding: 1.5rem;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px rgba(27, 31, 42, 0.2);
   max-width: 360px;
   width: 90%;
 }
@@ -400,12 +398,12 @@
 .modalTitle {
   margin: 0 0 0.5rem;
   font-size: 1.25rem;
-  color: #333;
+  color: var(--color-text);
 }
 
 .modalMessage {
   margin: 0 0 1.25rem;
-  color: #555;
+  color: var(--color-text-secondary);
   font-size: 0.95rem;
 }
 
@@ -418,17 +416,17 @@
 
 .modalButton {
   padding: 0.65rem 1rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--color-border-input);
   border-radius: 8px;
-  background: #f5f5f5;
+  background: var(--color-lumi);
   cursor: pointer;
   font-size: 1rem;
-  color: #333;
+  color: var(--color-text);
   transition: background 0.2s;
 }
 
 .modalButton:hover {
-  background: #e8e8e8;
+  background: var(--color-surface-hover);
 }
 
 .modalCancel {
@@ -439,9 +437,9 @@
   background: none;
   cursor: pointer;
   font-size: 0.9rem;
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 .modalCancel:hover {
-  color: #333;
+  color: var(--color-text);
 }

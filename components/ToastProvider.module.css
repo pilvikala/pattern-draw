@@ -16,22 +16,22 @@
   color: white;
   font-size: 14px;
   line-height: 1.4;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 12px rgba(27, 31, 42, 0.2);
   cursor: pointer;
   pointer-events: auto;
   animation: slideIn 0.2s ease-out;
 }
 
 .success {
-  background: #16a34a;
+  background: var(--color-success);
 }
 
 .error {
-  background: #dc2626;
+  background: var(--color-danger);
 }
 
 .info {
-  background: #333;
+  background: var(--color-text);
 }
 
 @keyframes slideIn {

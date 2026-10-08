@@ -1,12 +1,18 @@
 .main {
     min-height: 100vh;
     padding: 1rem;
-    background: #f5f5f5;
+    background: var(--color-lumi);
 }
 
 .container {
     max-width: 1200px;
     margin: 0 auto;
+}
+
+.logoLink {
+    display: inline-flex;
+    margin: 0.5rem 0 1.5rem;
+    color: var(--color-text);
 }
 
 .header {
@@ -20,33 +26,34 @@
 
 .title {
     font-size: 2rem;
-    font-weight: bold;
+    font-weight: 800;
+    letter-spacing: -0.035em;
     margin: 0;
-    color: #333;
+    color: var(--color-text);
 }
 
 .newButton {
     display: inline-block;
     padding: 0.75rem 1.5rem;
-    background: #0070f3;
+    background: var(--color-accent);
     color: white;
     text-decoration: none;
-    border-radius: 8px;
-    font-weight: 500;
+    border-radius: 999px;
+    font-weight: 600;
     transition: background 0.2s;
     border: none;
     cursor: pointer;
 }
 
 .newButton:hover {
-    background: #0051cc;
+    background: var(--color-accent-hover);
 }
 
 .loading {
     text-align: center;
     padding: 3rem;
     font-size: 1.2rem;
-    color: #666;
+    color: var(--color-text-muted);
 }
 
 .empty {
@@ -54,28 +61,28 @@
     padding: 4rem 2rem;
     background: white;
     border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgba(27, 31, 42, 0.1);
 }
 
 .empty p {
     font-size: 1.1rem;
-    color: #666;
+    color: var(--color-text-muted);
     margin-bottom: 1.5rem;
 }
 
 .emptyButton {
     display: inline-block;
     padding: 0.75rem 1.5rem;
-    background: #0070f3;
+    background: var(--color-accent);
     color: white;
     text-decoration: none;
-    border-radius: 8px;
-    font-weight: 500;
+    border-radius: 999px;
+    font-weight: 600;
     transition: background 0.2s;
 }
 
 .emptyButton:hover {
-    background: #0051cc;
+    background: var(--color-accent-hover);
 }
 
 .grid {
@@ -88,7 +95,7 @@
     background: white;
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgba(27, 31, 42, 0.1);
     transition: transform 0.2s, box-shadow 0.2s;
     display: flex;
     flex-direction: column;
@@ -96,7 +103,7 @@
 
 .card:hover {
     transform: translateY(-4px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 16px rgba(27, 31, 42, 0.15);
 }
 
 .previewLink {
@@ -108,7 +115,7 @@
 .preview {
     width: 100%;
     aspect-ratio: 1;
-    background: #f9f9f9;
+    background: var(--color-lumi);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -122,7 +129,7 @@
 }
 
 .previewPlaceholder {
-    color: #999;
+    color: var(--color-text-muted);
     font-size: 0.9rem;
 }
 
@@ -138,7 +145,7 @@
     flex-direction: column;
     gap: 0.5rem;
     font-size: 0.875rem;
-    color: #666;
+    color: var(--color-text-muted);
 }
 
 .date {
@@ -149,7 +156,7 @@
 
 .dateLabel {
     font-weight: 600;
-    color: #333;
+    color: var(--color-text);
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -174,7 +181,7 @@
 }
 
 .editButton {
-    background: #0070f3;
+    background: var(--color-accent);
     color: white;
     text-decoration: none;
     display: flex;
@@ -183,16 +190,16 @@
 }
 
 .editButton:hover {
-    background: #0051cc;
+    background: var(--color-accent-hover);
 }
 
 .deleteButton {
-    background: #ef4444;
+    background: var(--color-danger);
     color: white;
 }
 
 .deleteButton:hover:not(:disabled) {
-    background: #dc2626;
+    background: var(--color-danger);
 }
 
 .deleteButton:disabled {

@@ -1,0 +1,19 @@
+.lockup {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0.25em;
+  line-height: 1;
+  color: var(--color-yo);
+}
+
+.reversed {
+  color: var(--color-lumi);
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-size: 1.34em;
+  font-weight: 800;
+  line-height: 0.74;
+  letter-spacing: -0.045em;
+}
