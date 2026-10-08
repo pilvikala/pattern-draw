@@ -2,17 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { serializeDrawing, deserializeDrawing } from '@/lib/serialization'
-import { MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
-import type { DrawingData } from '@/lib/types'
-
-// Counts painted cells across all layers.
-function countEntries(data: DrawingData): number {
-    let count = 0
-    for (const layer of data.layers) {
-        count += Object.keys(layer.grid).length
-    }
-    return count
-}
+import { MAX_TOTAL_GRID_ENTRIES, totalGridEntryCount } from '@/lib/layers'
 
 // POST /api/drawings/[id]/duplicate - Copy a drawing into a new one owned by the current user
 export async function POST(
@@ -27,8 +17,11 @@ export async function POST(
         }
 
         const { id } = await params
-        const source = await prisma.drawing.findUnique({
-            where: { id },
+        // Only the owner may duplicate a drawing. Scoping the lookup to the
+        // owner (and answering 404 otherwise) also avoids confirming that
+        // other users' drawing ids exist.
+        const source = await prisma.drawing.findFirst({
+            where: { id, ownerId: session.user.id },
             select: { drawing: true },
         })
 
@@ -36,9 +29,13 @@ export async function POST(
             return NextResponse.json({ error: 'Drawing not found' }, { status: 404 })
         }
 
-        const data = deserializeDrawing(source.drawing)!
+        const data = deserializeDrawing(source.drawing)
 
-        if (countEntries(data) > MAX_TOTAL_GRID_ENTRIES) {
+        if (!data) {
+            return NextResponse.json({ error: 'Invalid drawing data' }, { status: 500 })
+        }
+
+        if (totalGridEntryCount(data) > MAX_TOTAL_GRID_ENTRIES) {
             return NextResponse.json({ error: 'Drawing is too large to duplicate' }, { status: 400 })
         }
 
