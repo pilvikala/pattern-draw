@@ -104,6 +104,9 @@ function HomeContent() {
   // auto save), used to skip autosaves when nothing changed.
   const lastPersistedRef = useRef<string | null>(null)
   const autosaveInFlightRef = useRef(false)
+  // Snapshot the server rejected with a non-retryable 4xx (e.g. too large);
+  // not re-uploaded until the drawing changes.
+  const lastRejectedRef = useRef<string | null>(null)
   // Bumped whenever the current drawing is replaced (new drawing, load) so a
   // slow autosave response for the previous drawing is discarded, not applied.
   const drawingGenerationRef = useRef(0)
@@ -243,6 +246,10 @@ function HomeContent() {
   // Applies a loaded/decoded DrawingData into state - shared by the
   // localStorage, URL-share, and saved-drawing load effects below.
   const applyLoadedDrawing = (data: DrawingData) => {
+    // Whatever is loaded here (localStorage restore, share link, saved drawing)
+    // is the baseline: autosave waits for the user's first edit instead of
+    // saving content they never touched as a new drawing.
+    lastPersistedRef.current = JSON.stringify(normalizeDrawingData(data))
     setPattern(data.pattern)
     setPixelSize(data.pixelSize)
     setCanvasWidth(data.canvasWidth)
@@ -327,7 +334,6 @@ function HomeContent() {
               // deserializeDrawing, which now always normalizes internally.
               drawingGenerationRef.current++
               applyLoadedDrawing(drawingData)
-              lastPersistedRef.current = JSON.stringify(normalizeDrawingData(drawingData))
               setCurrentDrawingId(drawingId)
             } else {
               loadedDrawingIdRef.current = null
@@ -1077,8 +1083,11 @@ function HomeContent() {
       if (urlId && urlId !== id) return
       const generation = drawingGenerationRef.current
       const drawingData = build()
+      // Same cap as the API and the localStorage autosave: oversized drawings
+      // would only be rejected by the server.
+      if (totalGridEntryCount(drawingData) > MAX_TOTAL_GRID_ENTRIES) return
       const snapshot = JSON.stringify(drawingData)
-      if (snapshot === lastPersistedRef.current) return
+      if (snapshot === lastPersistedRef.current || snapshot === lastRejectedRef.current) return
       if (!id && lastPersistedRef.current === null && !drawingData.layers?.some(l => isFreehandLayer(l) ? (l.strokes?.length ?? 0) > 0 : Object.keys(l.grid).length > 0)) return
       autosaveInFlightRef.current = true
       try {
@@ -1088,7 +1097,14 @@ function HomeContent() {
           body: JSON.stringify({ drawingData }),
           credentials: 'include',
         })
-        if (!response.ok) return // silent; retried on next tick
+        if (!response.ok) {
+          // Silent. Transient failures retry on the next tick; other 4xx would
+          // fail identically until the drawing changes.
+          if (response.status >= 400 && response.status < 500 && ![401, 408, 429].includes(response.status)) {
+            lastRejectedRef.current = snapshot
+          }
+          return
+        }
         const created = id ? null : (await response.json()).drawing
         // The user started a new drawing or loaded another one meanwhile.
         if (generation !== drawingGenerationRef.current) return
@@ -1185,6 +1201,11 @@ function HomeContent() {
       return
     }
 
+    if (autosaveInFlightRef.current) {
+      showToast('Autosave in progress, please try again in a moment', 'error')
+      return
+    }
+
     setIsSavingCopy(true)
     try {
       const drawingData = buildDrawingData()
@@ -1208,6 +1229,9 @@ function HomeContent() {
 
       if (response.ok) {
         const { drawing } = await response.json()
+        // Discard any autosave response still in flight for the old binding.
+        drawingGenerationRef.current++
+        lastPersistedRef.current = JSON.stringify(drawingData)
         setCurrentDrawingId(drawing.id)
         // Mark this id as already loaded so the ?id= load effect doesn't
         // refetch it and reset the undo history now that the URL changes.
