@@ -54,7 +54,6 @@ Create a `.env` file in the root directory with the following variables:
 DATABASE_URL="postgresql://user:password@localhost:5432/pattern_draw?schema=public"
 
 # NextAuth
-NEXTAUTH_URL="http://localhost:3000"
 NEXTAUTH_SECRET="your-secret-key-here-generate-with-openssl-rand-base64-32"
 
 # Google OAuth (optional, for Google sign-in)
@@ -95,8 +94,27 @@ To enable Google sign-in:
 2. Create a new project or select an existing one
 3. Enable the Google+ API
 4. Create OAuth 2.0 credentials (Web application)
-5. Add authorized redirect URI: `http://localhost:3000/api/auth/callback/google`
+5. Add an authorized redirect URI for **every** domain the app is served from, e.g.:
+   - `http://localhost:3000/api/auth/callback/google`
+   - `https://your-domain.com/api/auth/callback/google`
+   - `https://www.your-other-domain.com/api/auth/callback/google`
 6. Copy the Client ID and Client Secret to your `.env` file
+
+#### Multiple domains
+
+Sign-in works on any domain the app is reachable from: when no fixed URL is configured,
+Auth.js derives the auth URL from the incoming request's `Host` / `X-Forwarded-Host` header.
+Auth.js trusts the host automatically on Vercel and in development. A self-hosted production
+deployment behind a reverse proxy that sets `X-Forwarded-Host` needs `AUTH_TRUST_HOST=true`
+(only do this when the proxy overwrites that header, otherwise clients can spoof it).
+For this to work:
+
+- **Do not set `NEXTAUTH_URL` (or `AUTH_URL`).** If either is set, all sign-ins are forced
+  onto that single origin.
+- Register `https://<domain>/api/auth/callback/google` for each domain in the Google OAuth
+  client (Google does not accept wildcards, so ephemeral preview URLs need to be added
+  individually or won't support Google sign-in).
+- Sessions are per-domain: signing in on one domain does not sign you in on another.
 
 ### PostHog Setup (Optional)
 
@@ -133,8 +151,8 @@ The easiest way to deploy is using the [Vercel Platform](https://vercel.com/new)
 
 Make sure to:
 1. Set all environment variables in Vercel dashboard
-2. Update `NEXTAUTH_URL` to your production domain
-3. Update Google OAuth redirect URI to your production domain
+2. Leave `NEXTAUTH_URL` unset (see [Multiple domains](#multiple-domains))
+3. Add a Google OAuth redirect URI for each production domain
 4. Run database migrations on your production database
 
 
