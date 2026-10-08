@@ -9,12 +9,24 @@ A pixel art drawing app for creating patterns. Draw on a customizable matrix wit
 - Color picker and saved color palette
 - Click/tap to draw
 - Layers, including freehand layers for drawing smooth lines by hand
+- Select tool with add/subtract selection for any shape (see below)
 - Save to local storage
 - Share drawings via URL
 - Download/print functionality
 - User authentication (Google OAuth and email/password)
 - User accounts for saving patterns
 - Analytics and session replay with PostHog (optional)
+
+## Selecting
+
+The select tool (**S**) selects a rectangle by dragging; dragging inside the selection moves it. The selection can be copied, cut, pasted, mirrored and deleted.
+
+To select other shapes, add rectangles to the selection or cut them out of it:
+
+- **On desktop**, hold **Shift** while dragging to add and **Alt** (Option on a Mac) to subtract.
+- **On any screen**, including touch screens, pick **New**, **Add** or **Subtract** with the buttons that appear next to the select tool. The chosen mode stays on until you pick another, so several areas can be added or cut out in a row. In Add and Subtract mode a drag always draws a marquee, so switch back to New to move the selection.
+
+Copying a shaped selection keeps its shape: pasting it overwrites only the cells that were selected and leaves the rest of the area as it was. Mirroring flips the selection's contents across the middle of its bounding box, and the selection flips with them.
 
 ## Freehand Layers
 

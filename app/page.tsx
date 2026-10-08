@@ -14,15 +14,15 @@ import LayersPanel from '@/components/LayersPanel'
 import LayersDrawer from '@/components/LayersDrawer'
 import { encodeDrawing, decodeDrawing } from '@/lib/serialization'
 import { floodFillGrid } from '@/lib/floodFill'
-import { copySelectionCells, clearRectFromGrid, pasteClipboardToGrid, mirrorRectHorizontally } from '@/lib/selection'
+import { copySelectionCells, clearSelectionFromGrid, pasteClipboardToGrid, mirrorSelectionHorizontally, mirrorSelection, selectionBounds, selectionFromClipboard, translateSelection } from '@/lib/selection'
 import { compositeLayers, createLayer, createFreehandLayer, createDefaultLayers, clampActiveLayerIndex, normalizeDrawingData, mergeLayerDown, isFreehandLayer, MAX_LAYERS, totalGridEntryCount, MAX_TOTAL_GRID_ENTRIES } from '@/lib/layers'
 import {
   canvasBounds,
-  clearStrokesInRect,
-  copyStrokesInRect,
+  clearStrokesInSelection,
+  copyStrokesInSelection,
   eraseStrokesAt,
-  mirrorStrokesInRect,
-  moveStrokesInRect,
+  mirrorStrokesInSelection,
+  moveStrokesInSelection,
   pasteStrokes,
   shiftStrokes,
   strokeColorAt,
@@ -33,7 +33,7 @@ import { trimHistoryToBudget } from '@/lib/history'
 import { drawOverlayLayers, splitRenderLayers } from '@/lib/freehandRender'
 import { paintCell, cellColorAt, cellQuarters, quarterAt, drawCell, PIXEL_SHAPES } from '@/lib/cells'
 import type { PixelShape } from '@/lib/cells'
-import type { DrawingData, MatrixPattern, Tool, SelectionRect, ClipboardData, Layer, HistoryEntry, Stroke } from '@/lib/types'
+import type { DrawingData, MatrixPattern, Tool, CellSelection, SelectionMode, ClipboardData, Layer, HistoryEntry, Stroke } from '@/lib/types'
 import { TRANSPARENT } from '@/lib/types'
 import UserMenu from '@/components/UserMenu'
 import { useToast } from '@/components/ToastProvider'
@@ -96,7 +96,10 @@ function HomeContent() {
   // Tool to restore once the color picker has been used - the picker is
   // momentary, unlike fill/draw which stay selected until changed.
   const previousToolRef = useRef<Tool>('draw')
-  const [selection, setSelection] = useState<SelectionRect | null>(null)
+  const [selection, setSelection] = useState<CellSelection | null>(null)
+  // How a new marquee combines with the selection. Stays as chosen until
+  // changed; Shift (add) and Alt (subtract) override it for a single drag.
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>('replace')
   // A line has been started with the line tool; Escape then cancels it.
   const [isLineActive, setIsLineActive] = useState(false)
   const [clipboard, setClipboard] = useState<ClipboardData | null>(null)
@@ -498,8 +501,8 @@ function HomeContent() {
     setTool(enabled ? 'select' : 'draw')
   }
 
-  const handleSelectionChange = useCallback((rect: SelectionRect | null) => {
-    setSelection(rect)
+  const handleSelectionChange = useCallback((next: CellSelection | null) => {
+    setSelection(next)
   }, [])
 
   // Applies `updater` to the active layer's grid. `onApplied`, if given, runs
@@ -581,29 +584,23 @@ function HomeContent() {
 
   const handleSelectionMoveEnd = useCallback((deltaRow: number, deltaCol: number) => {
     if (!selection) return
-    const newRect: SelectionRect = {
-      startRow: selection.startRow + deltaRow,
-      startCol: selection.startCol + deltaCol,
-      endRow: selection.endRow + deltaRow,
-      endCol: selection.endCol + deltaCol,
-    }
+    const moved = translateSelection(selection, deltaRow, deltaCol)
     if (isFreehandLayer(layersRef.current[activeLayerIndexRef.current])) {
-      if (!updateActiveLayerStrokes((prev) => moveStrokesInRect(prev, selection, deltaRow, deltaCol, strokeBounds), saveToHistoryImmediate)) return
+      if (!updateActiveLayerStrokes((prev) => moveStrokesInSelection(prev, selection, deltaRow, deltaCol, strokeBounds), saveToHistoryImmediate)) return
     } else {
+      const { startRow, startCol } = selectionBounds(moved)
       updateActiveLayerGrid((prev) => {
         const clip = copySelectionCells(prev, selection)
-        let newGrid = clearRectFromGrid(prev, selection)
-        newGrid = pasteClipboardToGrid(newGrid, clip, newRect.startRow, newRect.startCol, canvasWidth, canvasHeight)
-        return newGrid
+        return pasteClipboardToGrid(clearSelectionFromGrid(prev, selection), clip, startRow, startCol, canvasWidth, canvasHeight)
       }, saveToHistoryImmediate)
     }
-    setSelection(newRect)
+    setSelection(moved)
   }, [selection, canvasWidth, canvasHeight, strokeBounds, saveToHistoryImmediate, updateActiveLayerGrid, updateActiveLayerStrokes])
 
   const handleCopy = useCallback(() => {
     if (!selection) return
     if (isFreehandLayer(layersRef.current[activeLayerIndexRef.current])) {
-      setClipboard(copyStrokesInRect(getActiveStrokes(), selection))
+      setClipboard(copyStrokesInSelection(getActiveStrokes(), selection))
       return
     }
     const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
@@ -613,19 +610,20 @@ function HomeContent() {
   const handleCut = useCallback(() => {
     if (!selection) return
     if (isFreehandLayer(layersRef.current[activeLayerIndexRef.current])) {
-      const copied = copyStrokesInRect(getActiveStrokes(), selection)
-      if (updateActiveLayerStrokes((prev) => clearStrokesInRect(prev, selection), saveToHistoryImmediate)) setClipboard(copied)
+      const copied = copyStrokesInSelection(getActiveStrokes(), selection)
+      if (updateActiveLayerStrokes((prev) => clearStrokesInSelection(prev, selection), saveToHistoryImmediate)) setClipboard(copied)
       return
     }
     const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
     setClipboard(copySelectionCells(activeGrid, selection))
-    updateActiveLayerGrid((prev) => clearRectFromGrid(prev, selection), saveToHistoryImmediate)
+    updateActiveLayerGrid((prev) => clearSelectionFromGrid(prev, selection), saveToHistoryImmediate)
   }, [selection, saveToHistoryImmediate, updateActiveLayerGrid, updateActiveLayerStrokes])
 
   const handlePaste = useCallback(() => {
     if (!clipboard) return
-    const targetRow = selection ? selection.startRow : 0
-    const targetCol = selection ? selection.startCol : 0
+    const target = selection ? selectionBounds(selection) : null
+    const targetRow = target ? target.startRow : 0
+    const targetCol = target ? target.startCol : 0
     // Strokes and cells can't be converted into each other.
     const clipboardIsStrokes = !!clipboard.strokes
     const layerIsFreehand = isFreehandLayer(layersRef.current[activeLayerIndexRef.current])
@@ -642,21 +640,16 @@ function HomeContent() {
       updateActiveLayerGrid((prev) => pasteClipboardToGrid(prev, clipboard, targetRow, targetCol, canvasWidth, canvasHeight), saveToHistoryImmediate)
     }
     setTool('select')
-    setSelection({
-      startRow: targetRow,
-      startCol: targetCol,
-      endRow: Math.min(targetRow + clipboard.height - 1, canvasHeight - 1),
-      endCol: Math.min(targetCol + clipboard.width - 1, canvasWidth - 1),
-    })
+    setSelection(selectionFromClipboard(clipboard, targetRow, targetCol, canvasWidth, canvasHeight))
   }, [clipboard, selection, canvasWidth, canvasHeight, strokeBounds, showToast, saveToHistoryImmediate, updateActiveLayerGrid, updateActiveLayerStrokes])
 
   const handleDeleteSelection = useCallback(() => {
     if (!selection) return
     if (isFreehandLayer(layersRef.current[activeLayerIndexRef.current])) {
-      updateActiveLayerStrokes((prev) => clearStrokesInRect(prev, selection), saveToHistoryImmediate)
+      updateActiveLayerStrokes((prev) => clearStrokesInSelection(prev, selection), saveToHistoryImmediate)
       return
     }
-    updateActiveLayerGrid((prev) => clearRectFromGrid(prev, selection), saveToHistoryImmediate)
+    updateActiveLayerGrid((prev) => clearSelectionFromGrid(prev, selection), saveToHistoryImmediate)
   }, [selection, saveToHistoryImmediate, updateActiveLayerGrid, updateActiveLayerStrokes])
 
   const handleDeselect = useCallback(() => {
@@ -665,11 +658,14 @@ function HomeContent() {
 
   const handleMirror = useCallback(() => {
     if (!selection) return
+    // The contents flip across the middle of the selection's bounding box, so
+    // a selection that isn't symmetric flips along with them.
     if (isFreehandLayer(layersRef.current[activeLayerIndexRef.current])) {
-      updateActiveLayerStrokes((prev) => mirrorStrokesInRect(prev, selection), saveToHistoryImmediate)
+      if (updateActiveLayerStrokes((prev) => mirrorStrokesInSelection(prev, selection), saveToHistoryImmediate)) setSelection(mirrorSelection(selection))
       return
     }
-    updateActiveLayerGrid((prev) => mirrorRectHorizontally(prev, selection), saveToHistoryImmediate)
+    updateActiveLayerGrid((prev) => mirrorSelectionHorizontally(prev, selection), saveToHistoryImmediate)
+    setSelection(mirrorSelection(selection))
   }, [selection, saveToHistoryImmediate, updateActiveLayerGrid, updateActiveLayerStrokes])
 
   const handleUndo = useCallback(() => {
@@ -1539,6 +1535,8 @@ function HomeContent() {
                 fillDisabled={activeIsFreehand}
                 isSelectMode={tool === 'select'}
                 onSelectModeToggle={handleSelectModeToggle}
+                selectionMode={selectionMode}
+                onSelectionModeChange={setSelectionMode}
                 canCopy={tool === 'select' && !!selection}
                 canPaste={!!clipboard}
                 onCopy={handleCopy}
@@ -1575,6 +1573,7 @@ function HomeContent() {
                 onPixelFill={handlePixelFill}
                 tool={tool}
                 selection={selection}
+                selectionMode={selectionMode}
                 onSelectionChange={handleSelectionChange}
                 onSelectionMoveEnd={handleSelectionMoveEnd}
                 onStrokeCommit={handleStrokeCommit}
@@ -1635,6 +1634,8 @@ function HomeContent() {
                 fillDisabled={activeIsFreehand}
                 isSelectMode={tool === 'select'}
                 onSelectModeToggle={handleSelectModeToggle}
+                selectionMode={selectionMode}
+                onSelectionModeChange={setSelectionMode}
                 canCopy={tool === 'select' && !!selection}
                 canPaste={!!clipboard}
                 onCopy={handleCopy}

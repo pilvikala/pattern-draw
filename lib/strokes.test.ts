@@ -1,15 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import {
   canvasBounds,
-  clearStrokesInRect,
+  clearStrokesInSelection,
   clipStrokes,
-  copyStrokesInRect,
+  clipStrokesToSelection,
+  copyStrokesInSelection,
   countStrokePoints,
   distanceToStroke,
   eraseStrokesAt,
   MAX_POINTS_PER_STROKE,
-  mirrorStrokesInRect,
-  moveStrokesInRect,
+  mirrorStrokesInSelection,
+  moveStrokesInSelection,
   pasteStrokes,
   quantize,
   rectToBox,
@@ -18,10 +19,11 @@ import {
   strokeColorAt,
   translateStrokes,
 } from './strokes'
-import type { SelectionRect, Stroke } from './types'
+import type { CellSelection, SelectionRect, Stroke } from './types'
 
 const line = (points: number[], color = '#ff0000', width = 0.4): Stroke => ({ color, width, points })
 const rect = (startRow: number, startCol: number, endRow: number, endCol: number): SelectionRect => ({ startRow, startCol, endRow, endCol })
+const sel = (...rects: SelectionRect[]): CellSelection => ({ rects })
 const bounds = canvasBounds('squares', 20, 20)
 
 describe('quantize', () => {
@@ -137,18 +139,18 @@ describe('clipStrokes', () => {
 
 describe('selection operations', () => {
   it('copies what is inside the selection relative to its top-left corner', () => {
-    const clip = copyStrokesInRect([line([3, 3, 4, 3])], rect(2, 2, 5, 5))
+    const clip = copyStrokesInSelection([line([3, 3, 4, 3])], sel(rect(2, 2, 5, 5)))
     expect(clip).toMatchObject({ width: 4, height: 4, cells: {} })
     expect(clip.strokes?.map((s) => s.points)).toEqual([[1, 1, 2, 1]])
   })
 
   it('clears only the selected region', () => {
-    const result = clearStrokesInRect([line([0, 1, 10, 1])], rect(0, 3, 3, 5))
+    const result = clearStrokesInSelection([line([0, 1, 10, 1])], sel(rect(0, 3, 3, 5)))
     expect(result.map((s) => s.points)).toEqual([[0, 1, 3, 1], [6, 1, 10, 1]])
   })
 
   it('pastes at the target, overwriting what was there', () => {
-    const clip = copyStrokesInRect([line([1, 1, 2, 1], '#00ff00')], rect(0, 0, 3, 3))
+    const clip = copyStrokesInSelection([line([1, 1, 2, 1], '#00ff00')], sel(rect(0, 0, 3, 3)))
     const existing = [line([10, 10, 11, 10], '#ff0000'), line([6, 6, 12, 6], '#0000ff')]
     const result = pasteStrokes(existing, clip, 5, 10, bounds)
     // The red line is below the 4x4 target (cols 10-13, rows 5-8) and stays;
@@ -161,13 +163,13 @@ describe('selection operations', () => {
   })
 
   it('drops pasted strokes that fall off the canvas', () => {
-    const clip = copyStrokesInRect([line([0, 0, 3, 0])], rect(0, 0, 3, 3))
+    const clip = copyStrokesInSelection([line([0, 0, 3, 0])], sel(rect(0, 0, 3, 3)))
     expect(pasteStrokes([], clip, 0, 18, bounds).map((s) => s.points)).toEqual([[18, 0, 20, 0]])
     expect(pasteStrokes([], clip, 0, 25, bounds)).toEqual([])
   })
 
   it('moves the selected part by whole cells and leaves the rest', () => {
-    const result = moveStrokesInRect([line([0, 1, 6, 1])], rect(0, 2, 3, 3), 2, 5, bounds)
+    const result = moveStrokesInSelection([line([0, 1, 6, 1])], sel(rect(0, 2, 3, 3)), 2, 5, bounds)
     const points = result.map((s) => s.points)
     expect(points).toContainEqual([0, 1, 2, 1])
     expect(points).toContainEqual([4, 1, 6, 1])
@@ -175,7 +177,7 @@ describe('selection operations', () => {
   })
 
   it('mirrors the selected part about the selection center', () => {
-    const result = mirrorStrokesInRect([line([2, 1, 3, 2])], rect(0, 2, 3, 5))
+    const result = mirrorStrokesInSelection([line([2, 1, 3, 2])], sel(rect(0, 2, 3, 5)))
     expect(result.map((s) => s.points)).toEqual([[6, 1, 5, 2]])
   })
 
@@ -188,6 +190,32 @@ describe('selection operations', () => {
     const moved = translateStrokes([line([0, 0, 1, 1])], 0.5, 2)
     expect(moved[0].points).toEqual([0.5, 2, 1.5, 3])
     expect(countStrokePoints(moved)).toBe(2)
+  })
+
+  it('splits a stroke across a shaped selection rect by rect', () => {
+    // Cols 0-1 and 4-5 of row 0 are selected; the line crosses both and the
+    // gap between them.
+    const { inside, outside } = clipStrokesToSelection([line([0, 0.5, 6, 0.5])], sel(rect(0, 0, 0, 1), rect(0, 4, 0, 5)))
+    expect(inside.map((s) => s.points)).toEqual([[0, 0.5, 2, 0.5], [4, 0.5, 6, 0.5]])
+    expect(outside.map((s) => s.points)).toEqual([[2, 0.5, 4, 0.5]])
+  })
+
+  it('copies a shaped selection with its shape, and pastes over only that shape', () => {
+    const shape = sel(rect(0, 0, 0, 0), rect(0, 2, 0, 2))
+    const clip = copyStrokesInSelection([line([0, 0.5, 3, 0.5], '#00ff00')], shape)
+    expect(clip.rects).toEqual(shape.rects)
+    expect(clip.strokes?.map((s) => s.points)).toEqual([[0, 0.5, 1, 0.5], [2, 0.5, 3, 0.5]])
+    // The blue line under the gap (col 1) survives the paste.
+    const result = pasteStrokes([line([0, 0.5, 3, 0.5], '#0000ff')], clip, 0, 0, bounds)
+    expect(result.filter((s) => s.color === '#0000ff').map((s) => s.points)).toEqual([[1, 0.5, 2, 0.5]])
+  })
+
+  it('mirrors a shaped selection and overwrites where it lands', () => {
+    // An L: (0,0) and row 1, cols 0-2. The stroke in (0,0) lands in (0,2),
+    // clearing the unselected stroke that was there.
+    const ell = sel(rect(0, 0, 0, 0), rect(1, 0, 1, 2))
+    const result = mirrorStrokesInSelection([line([0.2, 0.5, 0.8, 0.5]), line([2.2, 0.5, 2.8, 0.5], '#0000ff')], ell)
+    expect(result.map((s) => [s.color, s.points])).toEqual([['#ff0000', [2.8, 0.5, 2.2, 0.5]]])
   })
 
   it('maps a selection rect to the region it covers', () => {

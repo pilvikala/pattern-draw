@@ -3,8 +3,10 @@
 import { useRef } from 'react'
 import { EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
 import PencilToolButton from './PencilToolButton'
+import SelectionModeButtons from './SelectionModeButtons'
 import type { FreehandPenSettings } from './PencilToolButton'
 import type { PixelShape } from '@/lib/cells'
+import type { SelectionMode } from '@/lib/types'
 import styles from './ColorPicker.module.css'
 
 interface ColorPickerProps {
@@ -29,6 +31,9 @@ interface ColorPickerProps {
   fillDisabled?: boolean
   isSelectMode: boolean
   onSelectModeToggle: (enabled: boolean) => void
+  // How a new marquee combines with the selection; offered while selecting.
+  selectionMode: SelectionMode
+  onSelectionModeChange: (mode: SelectionMode) => void
   canCopy: boolean
   canPaste: boolean
   onCopy: () => void
@@ -57,6 +62,8 @@ export default function ColorPicker({
   fillDisabled,
   isSelectMode,
   onSelectModeToggle,
+  selectionMode,
+  onSelectionModeChange,
   canCopy,
   canPaste,
   onCopy,
@@ -157,6 +164,16 @@ export default function ColorPicker({
         >
           <SelectIcon className={styles.toolIcon} />
         </button>
+        {isSelectMode && (
+          <SelectionModeButtons
+            mode={selectionMode}
+            onModeChange={onSelectionModeChange}
+            groupClassName={styles.modeGroup}
+            buttonClassName={styles.toolButton}
+            activeClassName={styles.modeActive}
+            iconClassName={styles.toolIcon}
+          />
+        )}
         <button
           onClick={onCopy}
           disabled={!canCopy}
