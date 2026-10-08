@@ -21,12 +21,13 @@ interface PixelProps {
   pixelSize: number
   offsetAxis: 'x' | 'y' | 'none'
   offset: number
+  showGrid: boolean
 }
 
 // Memoized so that painting one cell doesn't re-render every other cell in
 // the grid - props are kept to primitives (no inline style objects/closures
 // passed in) so React's default shallow comparison actually catches repeats.
-const Pixel = memo(function Pixel({ row, col, color, pixelSize, offsetAxis, offset }: PixelProps) {
+const Pixel = memo(function Pixel({ row, col, color, pixelSize, offsetAxis, offset, showGrid }: PixelProps) {
   return (
     <div
       data-row={row}
@@ -37,7 +38,10 @@ const Pixel = memo(function Pixel({ row, col, color, pixelSize, offsetAxis, offs
         height: `${pixelSize}px`,
         // Empty cells and the empty part of a half-pixel show the white "paper".
         background: cellBackground(color, '#ffffff'),
-        border: '1px solid #ddd',
+        // A hidden grid keeps the border (so cells don't shift) but lets the
+        // cell's own background run under it, from the border's outer edge.
+        border: showGrid ? '1px solid #ddd' : '1px solid transparent',
+        backgroundOrigin: showGrid ? undefined : 'border-box',
         transform: offsetAxis === 'none' ? 'none' : offsetAxis === 'x' ? `translateX(${offset}px)` : `translateY(${offset}px)`,
       }}
     />
@@ -157,6 +161,8 @@ interface DrawingCanvasProps {
   onLineCommit: (keys: string[]) => void
   // Whether a line has been started and not yet finished or cancelled.
   onLineActiveChange: (active: boolean) => void
+  // Whether the lines between cells are drawn.
+  showGrid: boolean
 }
 
 export default function DrawingCanvas({
@@ -180,6 +186,7 @@ export default function DrawingCanvas({
   onStrokeErase,
   onLineCommit,
   onLineActiveChange,
+  showGrid,
 }: DrawingCanvasProps) {
   const isColorPickerMode = tool === 'colorPicker'
   const isFillMode = tool === 'fill'
@@ -424,9 +431,9 @@ export default function DrawingCanvas({
       const x = col + (pattern === 'bricks' && row % 2 === 1 ? 0.5 : 0)
       const y = row + (pattern === 'bricksVertical' && col % 2 === 1 ? 0.5 : 0)
       drawCell(ctx, value, x, y, 1)
-      ctx.strokeRect(x + lineWidth / 2, y + lineWidth / 2, 1 - lineWidth, 1 - lineWidth)
+      if (showGrid) ctx.strokeRect(x + lineWidth / 2, y + lineWidth / 2, 1 - lineWidth, 1 - lineWidth)
     }
-  }, [linePreview, prepareOverlayContext, activeLayer, selectedColor, pixelShape, pattern, pixelSize])
+  }, [linePreview, prepareOverlayContext, activeLayer, selectedColor, pixelShape, pattern, pixelSize, showGrid])
 
   // Where (clientX, clientY) falls on the canvas, in cells from its top-left
   // corner, clamped onto the canvas. Unlike getCellFromPoint this is the
@@ -1218,6 +1225,7 @@ export default function DrawingCanvas({
         pixelSize={pixelSize}
         offsetAxis="none"
         offset={0}
+        showGrid={showGrid}
       />
     )
   }
@@ -1234,6 +1242,7 @@ export default function DrawingCanvas({
         pixelSize={pixelSize}
         offsetAxis="x"
         offset={isOffset ? pixelSize / 2 : 0}
+        showGrid={showGrid}
       />
     )
   }
@@ -1250,6 +1259,7 @@ export default function DrawingCanvas({
         pixelSize={pixelSize}
         offsetAxis="y"
         offset={isOffset ? pixelSize / 2 : 0}
+        showGrid={showGrid}
       />
     )
   }
