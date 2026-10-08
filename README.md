@@ -102,8 +102,11 @@ To enable Google sign-in:
 
 #### Multiple domains
 
-Sign-in works on any domain the app is reachable from: the auth URL is derived from the
-incoming request's `Host` / `X-Forwarded-Host` header (`trustHost: true` in `lib/auth.ts`).
+Sign-in works on any domain the app is reachable from: when no fixed URL is configured,
+Auth.js derives the auth URL from the incoming request's `Host` / `X-Forwarded-Host` header.
+Auth.js trusts the host automatically on Vercel and in development. A self-hosted production
+deployment behind a reverse proxy that sets `X-Forwarded-Host` needs `AUTH_TRUST_HOST=true`
+(only do this when the proxy overwrites that header, otherwise clients can spoof it).
 For this to work:
 
 - **Do not set `NEXTAUTH_URL` (or `AUTH_URL`).** If either is set, all sign-ins are forced
