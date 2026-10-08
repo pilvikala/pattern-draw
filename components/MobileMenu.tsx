@@ -96,9 +96,9 @@ export default function MobileMenu({
                   onChange={(e) => onPatternChange(e.target.value as MatrixPattern)}
                   className={styles.select}
                 >
-                  <option value="squares">Regular Squares</option>
-                  <option value="bricks">Interleaved (Bricks)</option>
-                  <option value="bricksVertical">Interleaved Vertical</option>
+                  <option value="squares">Regular squares</option>
+                  <option value="bricks">Interleaved (bricks)</option>
+                  <option value="bricksVertical">Interleaved vertical</option>
                 </select>
               </div>
 

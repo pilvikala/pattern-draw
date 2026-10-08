@@ -127,7 +127,7 @@ export default function DrawingsPage() {
                     <div className={styles.empty}>
                         <p>No drawings yet. Create your first one!</p>
                         <Link href="/" className={styles.emptyButton}>
-                            Create Drawing
+                            Create drawing
                         </Link>
                     </div>
                 ) : (
