@@ -22,7 +22,7 @@
 .shapeToggle:hover,
 .shapeToggle[aria-expanded='true'] {
   background: var(--color-lumi);
-  border-color: var(--color-accent);
+  border-color: var(--color-selected);
 }
 
 .shapeToggleIcon {
@@ -64,12 +64,12 @@
 
 .menuItem:hover,
 .menuItem:focus-visible {
-  background: var(--color-accent-tint);
+  background: var(--color-selected-tint);
   outline: none;
 }
 
 .menuItemSelected {
-  color: var(--color-accent);
+  color: var(--color-selected);
   font-weight: 600;
 }
 
@@ -111,7 +111,7 @@
 
 .widthValue {
   flex: 1;
-  color: var(--color-accent);
+  color: var(--color-selected);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }

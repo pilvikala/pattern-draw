@@ -99,7 +99,7 @@ export default function LayersList({
           disabled={!canAddLayer}
           title={canAddLayer ? 'Add a pixel layer' : 'Maximum number of layers reached'}
         >
-          + Add Layer
+          + Add layer
         </button>
         <button
           onClick={onAddFreehandLayer}

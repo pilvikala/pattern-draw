@@ -33,7 +33,7 @@
 
 .select:focus {
   outline: none;
-  border-color: var(--color-accent);
+  border-color: var(--color-selected);
 }
 
 .slider {
@@ -50,7 +50,7 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--color-accent);
+  background: var(--color-selected);
   cursor: pointer;
 }
 
@@ -58,7 +58,7 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--color-accent);
+  background: var(--color-selected);
   cursor: pointer;
   border: none;
 }
@@ -74,28 +74,26 @@
 
 .textInput:focus {
   outline: none;
-  border-color: var(--color-accent);
+  border-color: var(--color-selected);
 }
 
 .setSizeButton {
-  padding: 0.75rem 1.5rem;
-  background: var(--color-yo);
-  color: white;
-  border-radius: 4px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.6rem 1.25rem;
+  background: white;
+  color: var(--color-text);
+  border: 1px solid var(--color-border-input);
+  border-radius: 999px;
   font-weight: 600;
-  transition: background 0.2s;
   font-size: 0.9rem;
   cursor: pointer;
-  border: none;
-  width: 100%;
+  transition: background 0.2s, border-color 0.2s;
 }
 
 .setSizeButton:hover {
-  background: var(--color-text-secondary);
-}
-
-.setSizeButton:active {
-  background: var(--color-text-secondary);
+  background: var(--color-lumi);
+  border-color: var(--color-yo);
 }
 
 .buttonGroup {
@@ -104,22 +102,39 @@
   flex-wrap: wrap;
 }
 
+/* Secondary actions: outlined, so the one primary action stands out. */
 .button {
-  padding: 0.75rem 1.5rem;
-  background: var(--color-accent);
-  color: white;
-  border-radius: 4px;
+  min-height: 44px;
+  padding: 0.6rem 1.25rem;
+  background: white;
+  color: var(--color-text);
+  border: 1px solid var(--color-border-input);
+  border-radius: 999px;
   font-weight: 600;
-  transition: background 0.2s;
+  transition: background 0.2s, border-color 0.2s;
   font-size: 0.9rem;
 }
 
-.button:hover {
-  background: var(--color-accent-hover);
+.button:hover:not(:disabled) {
+  background: var(--color-lumi);
+  border-color: var(--color-yo);
 }
 
-.button:active {
-  background: var(--color-accent-active);
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* The primary action (Save): the one Puolukka button in the panel. */
+.primaryButton {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
 }
 
 @media (max-width: 768px) {

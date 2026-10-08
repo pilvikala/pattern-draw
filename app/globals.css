@@ -25,6 +25,10 @@
   --color-accent-active: #7F1B2D;
   --color-accent-tint: #FBEAED;
   --color-accent-ring: rgba(200, 50, 74, 0.2);
+  /* Selection and focus states (active tool, active layer, focused input)
+     use Yö, so Puolukka stays reserved for the primary action. */
+  --color-selected: var(--color-yo);
+  --color-selected-tint: var(--color-surface-muted);
   --color-danger: #B42318;
   --color-danger-tint: #FDECEA;
   --color-success: #2E7D4F;
@@ -94,6 +98,7 @@ input,
 select,
 textarea {
   font-family: inherit;
+  accent-color: var(--color-selected);
 }
 
 :focus-visible {

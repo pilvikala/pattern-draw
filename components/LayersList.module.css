@@ -10,23 +10,21 @@
 }
 
 .addButtons .addButton {
-  flex: 1;
-}
-
-.addButton {
-  padding: 0.6rem 1rem;
-  background: var(--color-accent);
-  color: white;
-  border: none;
-  border-radius: 4px;
+  min-height: 40px;
+  padding: 0.5rem 1rem;
+  background: white;
+  color: var(--color-text);
+  border: 1px solid var(--color-border-input);
+  border-radius: 999px;
   font-weight: 600;
   font-size: 0.9rem;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.2s, border-color 0.2s;
 }
 
 .addButton:hover:not(:disabled) {
-  background: var(--color-accent-hover);
+  background: var(--color-lumi);
+  border-color: var(--color-yo);
 }
 
 .addButton:disabled {
@@ -56,8 +54,8 @@
 }
 
 .rowActive {
-  border-color: var(--color-accent);
-  background: var(--color-accent-tint);
+  border-color: var(--color-selected);
+  background: var(--color-selected-tint);
 }
 
 .visibilityToggle {
@@ -75,14 +73,14 @@
 }
 
 .visibilityToggle:hover {
-  color: var(--color-accent);
+  color: var(--color-selected);
 }
 
 .typeIcon {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  color: var(--color-accent);
+  color: var(--color-selected);
 }
 
 .typeIconSvg {
@@ -106,7 +104,7 @@
 }
 
 .name:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-selected);
   outline-offset: 1px;
   border-radius: 2px;
 }
@@ -116,7 +114,7 @@
   min-width: 0;
   font-size: 0.9rem;
   padding: 0.2rem 0.4rem;
-  border: 1px solid var(--color-accent);
+  border: 1px solid var(--color-selected);
   border-radius: 4px;
 }
 

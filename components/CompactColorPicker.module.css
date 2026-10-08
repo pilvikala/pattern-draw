@@ -44,12 +44,12 @@
 .saveButton:hover,
 .pickerButton:hover {
   background: var(--color-lumi);
-  border-color: var(--color-accent);
+  border-color: var(--color-selected);
 }
 
 .pickerButton.active {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
+  background: var(--color-selected);
+  border-color: var(--color-selected);
   color: white;
   animation: pulse 1s infinite;
 }
@@ -91,7 +91,7 @@
 }
 
 .pickerButton.modeActive {
-  background: var(--color-accent-tint);
-  border-color: var(--color-accent);
-  color: var(--color-accent);
+  background: var(--color-selected-tint);
+  border-color: var(--color-selected);
+  color: var(--color-selected);
 }

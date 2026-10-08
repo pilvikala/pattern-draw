@@ -181,8 +181,9 @@
 }
 
 .editButton {
-    background: var(--color-accent);
-    color: white;
+    background: white;
+    color: var(--color-text);
+    border: 1px solid var(--color-border-input);
     text-decoration: none;
     display: flex;
     align-items: center;
@@ -190,7 +191,8 @@
 }
 
 .editButton:hover {
-    background: var(--color-accent-hover);
+    background: var(--color-lumi);
+    border-color: var(--color-yo);
 }
 
 .deleteButton {
