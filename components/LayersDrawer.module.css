@@ -1,11 +1,11 @@
 .drawerButton {
   position: relative;
-  width: 48px;
-  height: 48px;
+  width: var(--header-control-size);
+  height: var(--header-control-size);
   background: white;
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;

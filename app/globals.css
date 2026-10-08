@@ -34,6 +34,9 @@
   --color-success: #2E7D4F;
   --color-overlay: rgba(27, 31, 42, 0.45);
 
+  /* Every control in the top nav shares one height, so they line up. */
+  --header-control-size: 40px;
+
   --font-display: var(--font-bricolage), 'Bricolage Grotesque', system-ui, sans-serif;
   --font-text: var(--font-instrument), 'Instrument Sans', system-ui, sans-serif;
   --font-mono: var(--font-dm-mono), 'DM Mono', ui-monospace, monospace;

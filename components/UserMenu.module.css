@@ -17,6 +17,12 @@
   justify-content: space-between;
 }
 
+.mobileMenuUserMenu .signInButton,
+.mobileMenuUserMenu .signUpButton {
+  justify-content: center;
+  height: 44px;
+}
+
 .mobileMenuUserMenu .menu {
   position: static !important;
   box-shadow: none;
@@ -41,17 +47,21 @@
 
 .signInButton,
 .signUpButton {
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  height: var(--header-control-size);
+  padding: 0 1rem;
+  border-radius: 999px;
   font-size: 0.875rem;
-  font-weight: 500;
+  font-weight: 600;
+  white-space: nowrap;
   text-decoration: none;
   transition: all 0.2s;
 }
 
 .signInButton {
-  color: var(--color-text-secondary);
-  background: transparent;
+  color: var(--color-text);
+  background: white;
   border: 1px solid var(--color-border-input);
 }
 
@@ -67,17 +77,18 @@
 }
 
 .signUpButton:hover {
-  opacity: 0.9;
+  background: var(--color-accent-hover);
 }
 
 .userButton {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  height: var(--header-control-size);
+  padding: 0 0.75rem 0 4px;
   background: white;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: 999px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -88,15 +99,15 @@
 }
 
 .avatar {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   object-fit: cover;
 }
 
 .avatarPlaceholder {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   background: var(--color-accent);
   display: flex;
