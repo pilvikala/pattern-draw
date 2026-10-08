@@ -5,7 +5,10 @@ import type { MatrixPattern, Tool, SelectionRect, Layer, Stroke } from '@/lib/ty
 import { normalizeRect, copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
 import { compositeLayers } from '@/lib/layers'
 import { TRANSPARENT } from '@/lib/types'
-import { cellBackground, compositeCell, drawCell } from '@/lib/cells'
+import { cellBackground, compositeCell, drawCell, paintCell } from '@/lib/cells'
+import type { PixelShape } from '@/lib/cells'
+import { lineCells, snapLineEnd } from '@/lib/line'
+import type { CellPos } from '@/lib/line'
 import { drawOverlayLayers, splitRenderLayers } from '@/lib/freehandRender'
 import { canvasBounds, moveStrokesInRect, simplifyPoints, quantize, MAX_POINTS_PER_STROKE } from '@/lib/strokes'
 import styles from './DrawingCanvas.module.css'
@@ -118,6 +121,8 @@ interface DrawingCanvasProps {
   selectedColor: string
   // Thickness, in cells, of the line the pencil draws on a freehand layer.
   strokeWidth: number
+  // Which part of a cell the pencil and line tools paint on a pixel layer.
+  pixelShape: PixelShape
   // Composited view of the layers the grid itself shows - what's actually
   // rendered as cells. Layers from the lowest visible freehand layer upward
   // are left out and drawn on the overlay canvas instead (see
@@ -148,6 +153,8 @@ interface DrawingCanvasProps {
   // The eraser passed over (x, y) - in cells from the canvas's top-left
   // corner - on the active freehand layer, with a reach of `radius` cells.
   onStrokeErase: (x: number, y: number, radius: number) => void
+  // A finished line on a pixel layer: the "row,col" keys of the cells it covers.
+  onLineCommit: (keys: string[]) => void
 }
 
 export default function DrawingCanvas({
@@ -157,6 +164,7 @@ export default function DrawingCanvas({
   canvasHeight,
   selectedColor,
   strokeWidth,
+  pixelShape,
   grid,
   activeLayerGrid,
   layers,
@@ -168,10 +176,12 @@ export default function DrawingCanvas({
   onSelectionMoveEnd,
   onStrokeCommit,
   onStrokeErase,
+  onLineCommit,
 }: DrawingCanvasProps) {
   const isColorPickerMode = tool === 'colorPicker'
   const isFillMode = tool === 'fill'
   const isSelectMode = tool === 'select'
+  const isLineMode = tool === 'line'
   // Fill and color-picker act on a single click rather than drag-painting;
   // select uses its own drag semantics (marquee / move), handled separately.
   const isSingleClickMode = isColorPickerMode || isFillMode
@@ -208,6 +218,17 @@ export default function DrawingCanvas({
   // make drawing sluggish on large canvases - the overlay is repainted
   // directly instead.
   const liveStrokeRef = useRef<{ layerId: string; stroke: Stroke } | null>(null)
+  // The line tool: a first click sets the start, the second ends the line.
+  // On a pixel layer the start is a cell and the preview (`linePreview`, the
+  // snapped run of cells) is drawn on its own canvas; on a freehand layer the
+  // start is an exact point and the preview is the live stroke, so it is
+  // painted in the layer's place in the stack.
+  const lineStartCellRef = useRef<CellPos | null>(null)
+  const lineStartPointRef = useRef<{ x: number; y: number } | null>(null)
+  const lineTouchRef = useRef<{ x: number; y: number } | null>(null)
+  const [linePreview, setLinePreview] = useState<CellPos[] | null>(null)
+  const [isLineActive, setIsLineActive] = useState(false)
+  const linePreviewCanvasRef = useRef<HTMLCanvasElement>(null)
   const [zoom, setZoom] = useState(1.0)
   const containerRef = useRef<HTMLDivElement>(null)
   const zoomContainerRef = useRef<HTMLDivElement>(null)
@@ -345,34 +366,64 @@ export default function DrawingCanvas({
   const overlayWidth = (dimensions.cols + (pattern === 'bricks' ? 0.5 : 0)) * pixelSize
   const overlayHeight = (dimensions.rows + (pattern === 'bricksVertical' ? 0.5 : 0)) * pixelSize
 
+  // Sizes an overlay-sized canvas's bitmap (only when it really changed -
+  // resizing resets it), clears it, and returns its context scaled so one unit
+  // is one grid cell.
+  const prepareOverlayContext = useCallback((canvas: HTMLCanvasElement): CanvasRenderingContext2D | null => {
+    const density = (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1) * Math.max(1, zoom)
+    const cap = Math.min(MAX_OVERLAY_SIDE / Math.max(overlayWidth, overlayHeight), Math.sqrt(MAX_OVERLAY_AREA / (overlayWidth * overlayHeight)))
+    const ratio = Math.min(density, cap)
+    const width = Math.max(1, Math.round(overlayWidth * ratio))
+    const height = Math.max(1, Math.round(overlayHeight * ratio))
+    if (canvas.width !== width) canvas.width = width
+    if (canvas.height !== height) canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.clearRect(0, 0, width, height)
+    ctx.setTransform((width / overlayWidth) * pixelSize, 0, 0, (height / overlayHeight) * pixelSize, 0, 0)
+    return ctx
+  }, [overlayWidth, overlayHeight, pixelSize, zoom])
+
   // Repaints the whole overlay: every layer from the lowest visible freehand
   // layer up, plus the stroke in progress. Cheap enough to redo per pointer
   // move at the sizes freehand drawing is used at.
   const paintOverlay = useCallback(() => {
     const canvas = overlayCanvasRef.current
     if (!canvas) return
-    const density = (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1) * Math.max(1, zoom)
-    const cap = Math.min(MAX_OVERLAY_SIDE / Math.max(overlayWidth, overlayHeight), Math.sqrt(MAX_OVERLAY_AREA / (overlayWidth * overlayHeight)))
-    const ratio = Math.min(density, cap)
-    const width = Math.max(1, Math.round(overlayWidth * ratio))
-    const height = Math.max(1, Math.round(overlayHeight * ratio))
-    // Resizing resets the bitmap, so only do it when the size really changed.
-    if (canvas.width !== width) canvas.width = width
-    if (canvas.height !== height) canvas.height = height
-    const ctx = canvas.getContext('2d')
+    const ctx = prepareOverlayContext(canvas)
     if (!ctx) return
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.clearRect(0, 0, width, height)
-    // One unit = one grid cell from here on.
-    ctx.setTransform((width / overlayWidth) * pixelSize, 0, 0, (height / overlayHeight) * pixelSize, 0, 0)
     drawOverlayLayers(ctx, overlayLayers, { pattern, pixelSize }, liveStrokeRef.current)
-  }, [overlayLayers, overlayWidth, overlayHeight, pattern, pixelSize, zoom])
+  }, [prepareOverlayContext, overlayLayers, pattern, pixelSize])
+
+  // For clearLine below, which must not change identity with the overlay.
+  const paintOverlayRef = useRef(paintOverlay)
 
   // Layout effect so a stroke that was just committed is painted from its
   // layer in the same frame its live copy is discarded - no flicker.
   useLayoutEffect(() => {
+    paintOverlayRef.current = paintOverlay
     paintOverlay()
   }, [paintOverlay, hasOverlay])
+
+  // The line being previewed on a pixel layer, painted the way it will look
+  // once committed. Over the cells (and any overlay), not in its layer's place.
+  useLayoutEffect(() => {
+    const canvas = linePreviewCanvasRef.current
+    if (!canvas || !linePreview) return
+    const ctx = prepareOverlayContext(canvas)
+    if (!ctx) return
+    const lineWidth = 1 / pixelSize
+    ctx.strokeStyle = '#ddd'
+    ctx.lineWidth = lineWidth
+    for (const { row, col } of linePreview) {
+      const value = paintCell(activeLayer?.grid[`${row},${col}`], selectedColor, pixelShape)
+      const x = col + (pattern === 'bricks' && row % 2 === 1 ? 0.5 : 0)
+      const y = row + (pattern === 'bricksVertical' && col % 2 === 1 ? 0.5 : 0)
+      drawCell(ctx, value, x, y, 1)
+      ctx.strokeRect(x + lineWidth / 2, y + lineWidth / 2, 1 - lineWidth, 1 - lineWidth)
+    }
+  }, [linePreview, prepareOverlayContext, activeLayer, selectedColor, pixelShape, pattern, pixelSize])
 
   // Where (clientX, clientY) falls on the canvas, in cells from its top-left
   // corner, clamped onto the canvas. Unlike getCellFromPoint this is the
@@ -455,6 +506,107 @@ export default function DrawingCanvas({
     else eraseAt(clientX, clientY)
   }, [tool, extendStroke, eraseAt])
 
+  // --- Line tool ---
+
+  // Drops the line in progress, if any.
+  const clearLine = useCallback(() => {
+    lineStartCellRef.current = null
+    lineTouchRef.current = null
+    const hadPoint = lineStartPointRef.current !== null
+    lineStartPointRef.current = null
+    setLinePreview(null)
+    setIsLineActive(false)
+    if (hadPoint) {
+      liveStrokeRef.current = null
+      paintOverlayRef.current()
+    }
+  }, [])
+
+  // Moves the end of the line in progress to the pointer, snapped to the grid
+  // and the 8 directions on a pixel layer, exactly where it is on a freehand one.
+  const updateLinePreview = useCallback((clientX: number, clientY: number) => {
+    if (activeIsFreehand) {
+      const start = lineStartPointRef.current
+      const live = liveStrokeRef.current
+      const point = getCanvasPoint(clientX, clientY)
+      if (!start || !live || !point) return
+      live.stroke.color = selectedColor
+      live.stroke.width = strokeWidth
+      live.stroke.points = [start.x, start.y, point.x, point.y]
+      paintOverlay()
+      return
+    }
+    const start = lineStartCellRef.current
+    const cell = getCellFromPoint(clientX, clientY)
+    if (!start || !cell) return
+    const end = snapLineEnd(start, cell, dimensions.rows, dimensions.cols)
+    setLinePreview((prev) => {
+      const last = prev?.[prev.length - 1]
+      return last && last.row === end.row && last.col === end.col ? prev : lineCells(start, end)
+    })
+  }, [activeIsFreehand, getCanvasPoint, getCellFromPoint, paintOverlay, selectedColor, strokeWidth, dimensions])
+
+  // A click with the line tool: the first sets the start, the second ends the
+  // line and commits it. The tool stays selected for the next line.
+  const lineClickAt = useCallback((clientX: number, clientY: number) => {
+    if (activeIsFreehand) {
+      const point = getCanvasPoint(clientX, clientY)
+      if (!point || !activeLayer) return
+      const start = lineStartPointRef.current
+      if (!start) {
+        lineStartPointRef.current = point
+        setIsLineActive(true)
+        liveStrokeRef.current = { layerId: activeLayer.id, stroke: { color: selectedColor, width: strokeWidth, points: [point.x, point.y] } }
+        paintOverlay()
+        return
+      }
+      // A second click on the start would only make a dot; wait for a real end.
+      if (Math.hypot(point.x - start.x, point.y - start.y) < MIN_POINT_SPACING) return
+      lineStartPointRef.current = null
+      liveStrokeRef.current = null
+      setIsLineActive(false)
+      onStrokeCommitRef.current({ color: selectedColor, width: strokeWidth, points: [start.x, start.y, point.x, point.y].map(quantize) })
+      paintOverlay()
+      return
+    }
+    const cell = getCellFromPoint(clientX, clientY)
+    if (!cell) return
+    const start = lineStartCellRef.current
+    if (!start) {
+      lineStartCellRef.current = cell
+      setIsLineActive(true)
+      setLinePreview([cell])
+      return
+    }
+    const end = snapLineEnd(start, cell, dimensions.rows, dimensions.cols)
+    const keys = lineCells(start, end).map(({ row, col }) => getPixelKey(row, col))
+    clearLine()
+    onLineCommit(keys)
+  }, [activeIsFreehand, activeLayer, getCanvasPoint, getCellFromPoint, selectedColor, strokeWidth, paintOverlay, dimensions, clearLine, onLineCommit])
+
+  // Leaving the tool, or changing what the line was started on, drops it.
+  useEffect(() => {
+    if (!isLineMode) clearLine()
+  }, [isLineMode, clearLine])
+  const activeLayerId = activeLayer?.id
+  useEffect(() => {
+    clearLine()
+  }, [activeLayerId, pattern, canvasWidth, canvasHeight, clearLine])
+
+  // Escape cancels the line in progress. Captured, so it doesn't also reach
+  // the editor's own Escape handling (which deselects).
+  useEffect(() => {
+    if (!isLineActive) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      clearLine()
+    }
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [isLineActive, clearLine])
+
   const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
     e.preventDefault()
     if (isSelectMode) {
@@ -478,6 +630,12 @@ export default function DrawingCanvas({
         setIsSelecting(true)
         onSelectionChange(normalizeRect(row, col, row, col))
       }
+      return
+    }
+    if (isLineMode) {
+      // Right-click cancels the line in progress; other buttons do nothing.
+      if (e.button === 2) clearLine()
+      else if (e.button === 0) lineClickAt(e.clientX, e.clientY)
       return
     }
     if (isSingleClickMode) {
@@ -523,6 +681,11 @@ export default function DrawingCanvas({
       return
     }
 
+    if (isLineMode) {
+      updateLinePreview(e.clientX, e.clientY)
+      return
+    }
+
     if (!isDrawing || !containerRef.current || isSingleClickMode) return
 
     if (isFreehandPointerMode) {
@@ -555,6 +718,8 @@ export default function DrawingCanvas({
       finishSelectInteraction()
       return
     }
+    // The live stroke is the line's preview, not a pencil stroke to finish.
+    if (isLineMode) return
     finishStroke()
     setIsDrawing(false)
   }
@@ -564,6 +729,7 @@ export default function DrawingCanvas({
       finishSelectInteraction()
       return
     }
+    if (isLineMode) return
     finishStroke()
     setIsDrawing(false)
   }
@@ -582,7 +748,8 @@ export default function DrawingCanvas({
       isPinchingRef.current = true
       // A second finger means a pinch, not a line: drop the stroke in
       // progress rather than committing the stray segment it drew so far.
-      cancelStroke()
+      // (A line in progress is not a stroke and survives the pinch.)
+      if (!isLineMode) cancelStroke()
       setIsDrawing(false)
 
       const touch1 = e.touches[0]
@@ -629,6 +796,14 @@ export default function DrawingCanvas({
           onSelectionChange(normalizeRect(cell.row, cell.col, cell.row, cell.col))
         }
       }
+      return
+    }
+
+    if (isLineMode) {
+      // A tap places the next point of the line (see handleTouchEnd); while
+      // the finger is down the line follows it.
+      lineTouchRef.current = { x: touch.clientX, y: touch.clientY }
+      updateLinePreview(touch.clientX, touch.clientY)
       return
     }
 
@@ -694,7 +869,7 @@ export default function DrawingCanvas({
         }
       }
     }
-  }, [isSingleClickMode, isSelectMode, isFreehandPointerMode, previewDragFromLayers, freehandDown, cancelStroke, pattern, pixelSize, dimensions, handlePixelClick, getPointInCell, zoom, getCellFromPoint, selection, onSelectionChange, activeLayerGrid])
+  }, [isSingleClickMode, isSelectMode, isLineMode, updateLinePreview, isFreehandPointerMode, previewDragFromLayers, freehandDown, cancelStroke, pattern, pixelSize, dimensions, handlePixelClick, getPointInCell, zoom, getCellFromPoint, selection, onSelectionChange, activeLayerGrid])
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     // Handle pinch gesture
@@ -709,7 +884,7 @@ export default function DrawingCanvas({
       }
 
       isPinchingRef.current = true
-      cancelStroke()
+      if (!isLineMode) cancelStroke()
       setIsDrawing(false)
 
       // Initialize pinch if not already started
@@ -753,6 +928,21 @@ export default function DrawingCanvas({
         const dRow = Math.max(-selection.startRow, Math.min(dimensions.rows - 1 - selection.endRow, rawDRow))
         const dCol = Math.max(-selection.startCol, Math.min(dimensions.cols - 1 - selection.endCol, rawDCol))
         setMoveDelta({ dRow, dCol })
+      }
+      return
+    }
+
+    if (isLineMode) {
+      if (isPinchingRef.current) return
+      const touch = e.touches[0]
+      const startPos = touchStartPosRef.current
+      if (startPos && Math.max(Math.abs(touch.clientX - startPos.x), Math.abs(touch.clientY - startPos.y)) > 8) {
+        // Moved too far to be a tap - the finger is scrolling or panning.
+        isScrollingRef.current = true
+        lineTouchRef.current = null
+      } else if (lineTouchRef.current) {
+        lineTouchRef.current = { x: touch.clientX, y: touch.clientY }
+        updateLinePreview(touch.clientX, touch.clientY)
       }
       return
     }
@@ -833,13 +1023,25 @@ export default function DrawingCanvas({
         handlePixelClick(row, col)
       }
     }
-  }, [isDrawing, isSingleClickMode, isSelectMode, isFreehandPointerMode, freehandMove, cancelStroke, isSelecting, isMovingSelection, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange])
+  }, [isDrawing, isSingleClickMode, isSelectMode, isLineMode, updateLinePreview, isFreehandPointerMode, freehandMove, cancelStroke, isSelecting, isMovingSelection, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange])
 
-  const handleTouchEnd = useCallback(() => {
+  const handleTouchEnd = useCallback((e?: TouchEvent) => {
     if (isSelectMode) {
       finishSelectInteraction()
     }
-    finishStroke()
+    if (isLineMode) {
+      // Lifting the finger after a tap (not a scroll, pinch or cancelled
+      // touch) places the point.
+      const point = lineTouchRef.current
+      lineTouchRef.current = null
+      if (point && e?.type === 'touchend' && !isScrollingRef.current && !isPinchingRef.current) {
+        // Also stops the browser's emulated mouse click from placing it twice.
+        e.preventDefault()
+        lineClickAt(point.x, point.y)
+      }
+    } else {
+      finishStroke()
+    }
     setIsDrawing(false)
 
     // Cancel any pending draw
@@ -858,7 +1060,7 @@ export default function DrawingCanvas({
     // Reset touch tracking
     touchStartPosRef.current = null
     isScrollingRef.current = false
-  }, [isSelectMode, isMovingSelection, moveDelta, onSelectionMoveEnd, finishStroke])
+  }, [isSelectMode, isLineMode, lineClickAt, isMovingSelection, moveDelta, onSelectionMoveEnd, finishStroke])
 
   // Zoom controls
   const handleZoomIn = useCallback(() => {
@@ -1112,7 +1314,7 @@ export default function DrawingCanvas({
           />
           <div
             ref={containerRef}
-            className={`${styles.canvas} ${isColorPickerMode ? styles.colorPickerMode : ''} ${isFillMode ? styles.fillMode : ''} ${isSelectMode ? styles.selectMode : ''}`}
+            className={`${styles.canvas} ${isColorPickerMode ? styles.colorPickerMode : ''} ${isFillMode ? styles.fillMode : ''} ${isSelectMode ? styles.selectMode : ''} ${isLineMode ? styles.lineMode : ''}`}
             style={{
               display: 'grid',
               gridTemplateColumns: `repeat(${dimensions.cols}, ${pixelSize}px)`,
@@ -1129,6 +1331,7 @@ export default function DrawingCanvas({
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseLeave}
+            onContextMenu={isLineMode ? (e) => e.preventDefault() : undefined}
           >
             {Array.from({ length: dimensions.rows }).map((_, row) =>
               Array.from({ length: dimensions.cols }).map((_, col) => {
@@ -1149,6 +1352,15 @@ export default function DrawingCanvas({
             {hasOverlay && (
               <canvas
                 ref={overlayCanvasRef}
+                className={styles.freehandOverlay}
+                aria-hidden="true"
+                style={{ width: `${overlayWidth}px`, height: `${overlayHeight}px` }}
+              />
+            )}
+
+            {isLineMode && linePreview && (
+              <canvas
+                ref={linePreviewCanvasRef}
                 className={styles.freehandOverlay}
                 aria-hidden="true"
                 style={{ width: `${overlayWidth}px`, height: `${overlayHeight}px` }}

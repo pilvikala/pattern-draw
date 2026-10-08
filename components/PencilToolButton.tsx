@@ -23,6 +23,11 @@ interface PencilToolButtonProps {
   onPixelShapeChange: (shape: PixelShape) => void
   // Set while a freehand layer is active.
   freehandPen?: FreehandPenSettings
+  // What the button is, so the line tool can reuse the pencil's menu: the
+  // defaults make it the pencil.
+  icon?: React.ComponentType<{ className?: string }>
+  toolName?: string
+  shortcutKey?: string
   // Styling of the surrounding toolbar, so the pencil matches its sibling tools.
   buttonClassName: string
   activeClassName: string
@@ -30,13 +35,17 @@ interface PencilToolButtonProps {
 }
 
 // The pencil tool button plus a dropdown for the shape it paints: a full
-// pixel or one of the four triangular halves.
+// pixel or one of the four triangular halves. The line tool uses the same
+// button and menu, as it paints with the same shape / line width.
 export default function PencilToolButton({
   isDrawMode,
   onDrawModeSelect,
   pixelShape,
   onPixelShapeChange,
   freehandPen,
+  icon: Icon = PencilIcon,
+  toolName = 'Draw tool',
+  shortcutKey = 'P',
   buttonClassName,
   activeClassName,
   iconClassName,
@@ -114,11 +123,11 @@ export default function PencilToolButton({
       <button
         onClick={onDrawModeSelect}
         className={`${buttonClassName} ${isDrawMode ? activeClassName : ''}`}
-        title={`Draw tool (P) - ${freehandPen ? 'Freehand' : shapeLabel}`}
-        aria-label="Draw tool"
+        title={`${toolName} (${shortcutKey}) - ${freehandPen ? 'Freehand' : shapeLabel}`}
+        aria-label={toolName}
         aria-pressed={isDrawMode}
       >
-        <PencilIcon className={iconClassName} />
+        <Icon className={iconClassName} />
       </button>
       <button
         ref={toggleRef}

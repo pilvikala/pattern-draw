@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef } from 'react'
-import { EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
+import { LineIcon, EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
 import PencilToolButton from './PencilToolButton'
 import type { FreehandPenSettings } from './PencilToolButton'
 import type { PixelShape } from '@/lib/cells'
@@ -17,6 +17,9 @@ interface ColorPickerProps {
   onPixelShapeChange: (shape: PixelShape) => void
   // Set while a freehand layer is active (see PencilToolButton).
   freehandPen?: FreehandPenSettings
+  isLineMode: boolean
+  onLineModeSelect: () => void
+  onLinePixelShapeChange: (shape: PixelShape) => void
   isEraseMode: boolean
   onEraseModeToggle: (enabled: boolean) => void
   isColorPickerMode: boolean
@@ -44,6 +47,9 @@ export default function ColorPicker({
   pixelShape,
   onPixelShapeChange,
   freehandPen,
+  isLineMode,
+  onLineModeSelect,
+  onLinePixelShapeChange,
   isEraseMode,
   onEraseModeToggle,
   isColorPickerMode,
@@ -106,6 +112,19 @@ export default function ColorPicker({
           pixelShape={pixelShape}
           onPixelShapeChange={onPixelShapeChange}
           freehandPen={freehandPen}
+          buttonClassName={styles.toolButton}
+          activeClassName={styles.active}
+          iconClassName={styles.toolIcon}
+        />
+        <PencilToolButton
+          isDrawMode={isLineMode}
+          onDrawModeSelect={onLineModeSelect}
+          pixelShape={pixelShape}
+          onPixelShapeChange={onLinePixelShapeChange}
+          freehandPen={freehandPen}
+          icon={LineIcon}
+          toolName="Line tool"
+          shortcutKey="L"
           buttonClassName={styles.toolButton}
           activeClassName={styles.active}
           iconClassName={styles.toolIcon}
