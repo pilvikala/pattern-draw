@@ -37,11 +37,12 @@ const Pixel = memo(function Pixel({ row, col, color, pixelSize, offsetAxis, offs
         width: `${pixelSize}px`,
         height: `${pixelSize}px`,
         // Empty cells and the empty part of a half-pixel show the white "paper".
-        background: cellBackground(color, '#ffffff'),
         // A hidden grid keeps the border (so cells don't shift) but lets the
-        // cell's own background run under it, from the border's outer edge.
+        // cell's own background run under it, laid out from the border's
+        // outer edge. The box is part of the shorthand rather than a separate
+        // backgroundOrigin, which a re-set `background` would silently reset.
+        background: showGrid ? cellBackground(color, '#ffffff') : `${cellBackground(color, '#ffffff')} border-box`,
         border: showGrid ? '1px solid #ddd' : '1px solid transparent',
-        backgroundOrigin: showGrid ? undefined : 'border-box',
         transform: offsetAxis === 'none' ? 'none' : offsetAxis === 'x' ? `translateX(${offset}px)` : `translateY(${offset}px)`,
       }}
     />
@@ -403,8 +404,8 @@ export default function DrawingCanvas({
     if (!canvas) return
     const ctx = prepareOverlayContext(canvas)
     if (!ctx) return
-    drawOverlayLayers(ctx, overlayLayers, { pattern, pixelSize }, liveStrokeRef.current)
-  }, [prepareOverlayContext, overlayLayers, pattern, pixelSize])
+    drawOverlayLayers(ctx, overlayLayers, { pattern, pixelSize, gridLines: showGrid }, liveStrokeRef.current)
+  }, [prepareOverlayContext, overlayLayers, pattern, pixelSize, showGrid])
 
   // For clearLine below, which must not change identity with the overlay.
   const paintOverlayRef = useRef(paintOverlay)
