@@ -92,7 +92,7 @@ export function SelectIcon({ className }: IconProps) {
 }
 
 // Selection modes: a smaller marquee with a plus (add to the selection) or a
-// minus (subtract from it). Replacing uses SelectIcon itself.
+// minus (subtract from it) beside it, with a clear gap between the two. Replacing uses SelectIcon itself.
 export function SelectAddIcon({ className }: IconProps) {
   return (
     <svg
@@ -103,8 +103,8 @@ export function SelectAddIcon({ className }: IconProps) {
       strokeLinecap="round"
       className={className}
     >
-      <rect x="3" y="3" width="13" height="13" rx="1" strokeDasharray="4 3" />
-      <path d="M18 14v8M14 18h8" />
+      <rect x="1" y="7" width="10" height="10" rx="1" strokeDasharray="3 2.5" />
+      <path d="M19.5 8.5v7M16.5 12h6" />
     </svg>
   )
 }
@@ -119,8 +119,8 @@ export function SelectSubtractIcon({ className }: IconProps) {
       strokeLinecap="round"
       className={className}
     >
-      <rect x="3" y="3" width="13" height="13" rx="1" strokeDasharray="4 3" />
-      <path d="M14 18h8" />
+      <rect x="1" y="7" width="10" height="10" rx="1" strokeDasharray="3 2.5" />
+      <path d="M16.5 12h6" />
     </svg>
   )
 }
