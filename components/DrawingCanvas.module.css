@@ -157,34 +157,63 @@
 }
 
 /* ─── Selection overlay ───────────────────────────────────────────────────── */
-.selectionMarquee {
+.selectionMarquee,
+.selectionHoleOutline,
+.selectionFloatingOutline {
   position: absolute;
-  box-sizing: border-box;
-  border: 2px dashed #0070f3;
-  background: rgba(0, 112, 243, 0.12);
+  display: block;
+  overflow: visible;
   pointer-events: none;
+}
+
+/* The selection outline is an SVG path along the edge of the selected
+   cells, so any shape built by adding and subtracting rectangles shows. */
+.selectionMarquee {
   z-index: 5;
 }
 
+.selectionArea {
+  fill: rgba(0, 112, 243, 0.12);
+}
+
+.selectionEdge {
+  fill: none;
+  stroke: #0070f3;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+/* While a selection is dragged on a pixel layer: the hole it leaves (z 4)
+   and the cells being moved (z 6), each outlined in the selection's shape.
+   Cells outside the shape are left clear on both canvases. */
 .selectionHole {
   position: absolute;
   display: block;
-  box-sizing: border-box;
-  border: 2px dashed #999;
   pointer-events: none;
   z-index: 4;
   image-rendering: pixelated;
 }
 
+.selectionHoleOutline {
+  z-index: 5;
+}
+
+.selectionHoleOutline .selectionEdge {
+  stroke: #999;
+}
+
 .selectionFloating {
   position: absolute;
   display: block;
-  box-sizing: border-box;
-  border: 2px dashed #0070f3;
   pointer-events: none;
   z-index: 6;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  /* Follows the painted cells rather than the bounding box. */
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.25));
   image-rendering: pixelated;
+}
+
+.selectionFloatingOutline {
+  z-index: 7;
 }
 
 /* ─── Zoom controls UI ────────────────────────────────────────────────────── */

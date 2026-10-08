@@ -16,11 +16,27 @@ export interface SelectionRect {
   endCol: number
 }
 
+// The cells the select tool has selected - any shape, built by adding and
+// subtracting rectangles. Stored as non-overlapping rectangles in a canonical
+// form (see lib/selection.ts), so a plain rectangle is a single entry and the
+// same area always comes out as the same list.
+export interface CellSelection {
+  rects: SelectionRect[]
+}
+
+// How a new marquee combines with the current selection.
+export type SelectionMode = 'replace' | 'add' | 'subtract'
+
 export interface ClipboardData {
+  // Size of the selection's bounding box.
   width: number
   height: number
-  // key = "relRow,relCol" relative to the selection's top-left corner.
-  // A value of TRANSPARENT means the cell was empty when copied.
+  // The selected area, relative to the bounding box's top-left corner. A
+  // paste only overwrites these cells.
+  rects: SelectionRect[]
+  // key = "relRow,relCol" relative to the selection's top-left corner, one
+  // entry per selected cell. A value of TRANSPARENT means the cell was empty
+  // when copied.
   cells: { [key: string]: string }
   // Present only when copied from a freehand layer (cells is then empty):
   // the strokes inside the selection, relative to its top-left corner.

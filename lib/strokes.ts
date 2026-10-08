@@ -1,4 +1,5 @@
-import type { ClipboardData, MatrixPattern, SelectionRect, Stroke } from './types'
+import type { CellSelection, ClipboardData, MatrixPattern, SelectionRect, Stroke } from './types'
+import { mirrorSelection, selectionBounds, selectionsEqual, translateSelection } from './selection'
 
 // Pure geometry for freehand layers (see Stroke in lib/types.ts). All
 // coordinates are in grid cells, with (0, 0) at the canvas's top-left
@@ -242,53 +243,67 @@ export function translateStrokes(strokes: readonly Stroke[], dx: number, dy: num
 // The selection-based operations below mirror the ones in lib/selection.ts
 // for pixel grids, so the select tool behaves the same on both kinds of layer.
 
-// What the selection holds, relative to its top-left corner.
-export function copyStrokesInRect(strokes: readonly Stroke[], rect: SelectionRect): ClipboardData {
-  const { inside } = clipStrokes(strokes, rectToBox(rect))
+// Splits strokes into what lies inside the selection and what lies outside
+// it, rectangle by rectangle (they don't overlap, so every piece lands once).
+export function clipStrokesToSelection(strokes: readonly Stroke[], selection: CellSelection): { inside: Stroke[]; outside: Stroke[] } {
+  const inside: Stroke[] = []
+  let outside: Stroke[] = [...strokes]
+  for (const rect of selection.rects) {
+    const parts = clipStrokes(outside, rectToBox(rect))
+    inside.push(...parts.inside)
+    outside = parts.outside
+  }
+  return { inside, outside }
+}
+
+// What the selection holds, relative to its bounding box's top-left corner.
+export function copyStrokesInSelection(strokes: readonly Stroke[], selection: CellSelection): ClipboardData {
+  const bounds = selectionBounds(selection)
+  const { inside } = clipStrokesToSelection(strokes, selection)
   return {
-    width: rect.endCol - rect.startCol + 1,
-    height: rect.endRow - rect.startRow + 1,
+    width: bounds.endCol - bounds.startCol + 1,
+    height: bounds.endRow - bounds.startRow + 1,
+    rects: translateSelection(selection, -bounds.startRow, -bounds.startCol).rects,
     cells: {},
-    strokes: translateStrokes(inside, -rect.startCol, -rect.startRow),
+    strokes: translateStrokes(inside, -bounds.startCol, -bounds.startRow),
   }
 }
 
-export function clearStrokesInRect(strokes: readonly Stroke[], rect: SelectionRect): Stroke[] {
-  return clipStrokes(strokes, rectToBox(rect)).outside
+export function clearStrokesInSelection(strokes: readonly Stroke[], selection: CellSelection): Stroke[] {
+  return clipStrokesToSelection(strokes, selection).outside
 }
 
-// Like a pixel paste, this overwrites the whole target area (whatever was
-// there is cleared first) and drops whatever lands off the canvas.
+// Like a pixel paste, this overwrites the copied area (whatever was there is
+// cleared first) and drops whatever lands off the canvas.
 export function pasteStrokes(strokes: readonly Stroke[], clip: ClipboardData, targetRow: number, targetCol: number, bounds: Box): Stroke[] {
-  const target: Box = { x0: targetCol, y0: targetRow, x1: targetCol + clip.width, y1: targetRow + clip.height }
-  const kept = clipStrokes(strokes, target).outside
+  const target = translateSelection({ rects: clip.rects }, targetRow, targetCol)
+  const kept = clipStrokesToSelection(strokes, target).outside
   const pasted = clipStrokes(translateStrokes(clip.strokes ?? [], targetCol, targetRow), bounds).inside
   return [...kept, ...pasted]
 }
 
 // Moves everything inside the selection by whole cells, overwriting the area
 // it lands on.
-export function moveStrokesInRect(strokes: readonly Stroke[], rect: SelectionRect, deltaRow: number, deltaCol: number, bounds: Box): Stroke[] {
-  const { inside, outside } = clipStrokes(strokes, rectToBox(rect))
-  const target = rectToBox(rect)
-  target.x0 += deltaCol
-  target.x1 += deltaCol
-  target.y0 += deltaRow
-  target.y1 += deltaRow
-  const kept = clipStrokes(outside, target).outside
+export function moveStrokesInSelection(strokes: readonly Stroke[], selection: CellSelection, deltaRow: number, deltaCol: number, bounds: Box): Stroke[] {
+  const { inside, outside } = clipStrokesToSelection(strokes, selection)
+  const kept = clipStrokesToSelection(outside, translateSelection(selection, deltaRow, deltaCol)).outside
   const moved = clipStrokes(translateStrokes(inside, deltaCol, deltaRow), bounds).inside
   return [...kept, ...moved]
 }
 
-// Flips what's inside the selection left-to-right, in place.
-export function mirrorStrokesInRect(strokes: readonly Stroke[], rect: SelectionRect): Stroke[] {
-  const { inside, outside } = clipStrokes(strokes, rectToBox(rect))
-  const axis = rect.startCol + rect.endCol + 1
+// Flips what's inside the selection left-to-right across the middle of its
+// bounding box, overwriting what was where it lands (see mirrorSelection).
+export function mirrorStrokesInSelection(strokes: readonly Stroke[], selection: CellSelection): Stroke[] {
+  const { inside, outside } = clipStrokesToSelection(strokes, selection)
+  const { startCol, endCol } = selectionBounds(selection)
+  const axis = startCol + endCol + 1
   const mirrored = inside.map((stroke) => ({
     ...stroke,
     points: stroke.points.map((v, i) => (i % 2 === 0 ? quantize(axis - v) : v)),
   }))
-  return [...outside, ...mirrored]
+  const landing = mirrorSelection(selection)
+  const kept = selectionsEqual(landing, selection) ? outside : clipStrokesToSelection(outside, landing).outside
+  return [...kept, ...mirrored]
 }
 
 // Used when the canvas is resized: shifts everything and drops what no

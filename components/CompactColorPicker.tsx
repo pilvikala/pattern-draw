@@ -2,8 +2,10 @@
 
 import { EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
 import PencilToolButton from './PencilToolButton'
+import SelectionModeButtons from './SelectionModeButtons'
 import type { FreehandPenSettings } from './PencilToolButton'
 import type { PixelShape } from '@/lib/cells'
+import type { SelectionMode } from '@/lib/types'
 import styles from './CompactColorPicker.module.css'
 
 interface CompactColorPickerProps {
@@ -28,6 +30,9 @@ interface CompactColorPickerProps {
   fillDisabled?: boolean
   isSelectMode: boolean
   onSelectModeToggle: (enabled: boolean) => void
+  // How a new marquee combines with the selection; offered while selecting.
+  selectionMode: SelectionMode
+  onSelectionModeChange: (mode: SelectionMode) => void
   canCopy: boolean
   canPaste: boolean
   onCopy: () => void
@@ -56,6 +61,8 @@ export default function CompactColorPicker({
   fillDisabled,
   isSelectMode,
   onSelectModeToggle,
+  selectionMode,
+  onSelectionModeChange,
   canCopy,
   canPaste,
   onCopy,
@@ -144,6 +151,16 @@ export default function CompactColorPicker({
       >
         <SelectIcon className={styles.pickerIcon} />
       </button>
+      {isSelectMode && (
+        <SelectionModeButtons
+          mode={selectionMode}
+          onModeChange={onSelectionModeChange}
+          groupClassName={styles.modeGroup}
+          buttonClassName={styles.pickerButton}
+          activeClassName={styles.modeActive}
+          iconClassName={styles.pickerIcon}
+        />
+      )}
       <button
         onClick={onCopy}
         disabled={!canCopy}

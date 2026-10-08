@@ -101,3 +101,19 @@
     opacity: 0.8;
   }
 }
+
+/* Selection mode (new / add / subtract), shown beside the select tool. */
+.modeGroup {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.toolButton.modeActive {
+  background: #e6f0ff;
+  border-color: #0070f3;
+  color: #0070f3;
+}

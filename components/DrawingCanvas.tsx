@@ -1,8 +1,19 @@
 'use client'
 
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, memo } from 'react'
-import type { MatrixPattern, Tool, SelectionRect, Layer, Stroke } from '@/lib/types'
-import { normalizeRect, copySelectionCells, clearRectFromGrid, pasteClipboardToGrid } from '@/lib/selection'
+import type { MatrixPattern, Tool, CellSelection, SelectionMode, Layer, Stroke } from '@/lib/types'
+import {
+  normalizeRect,
+  combineSelection,
+  isCellSelected,
+  selectionBounds,
+  selectionOutlinePath,
+  selectionAreaPath,
+  SelectionBitmap,
+  copySelectionCells,
+  clearSelectionFromGrid,
+  pasteClipboardToGrid,
+} from '@/lib/selection'
 import { compositeLayers } from '@/lib/layers'
 import { TRANSPARENT } from '@/lib/types'
 import { cellBackground, compositeCell, drawCell, paintCell } from '@/lib/cells'
@@ -10,7 +21,7 @@ import type { PixelShape } from '@/lib/cells'
 import { lineCells, snapLineEnd } from '@/lib/line'
 import type { CellPos } from '@/lib/line'
 import { drawOverlayLayers, splitRenderLayers } from '@/lib/freehandRender'
-import { canvasBounds, moveStrokesInRect, simplifyPoints, quantize, MAX_POINTS_PER_STROKE } from '@/lib/strokes'
+import { canvasBounds, moveStrokesInSelection, simplifyPoints, quantize, MAX_POINTS_PER_STROKE } from '@/lib/strokes'
 import styles from './DrawingCanvas.module.css'
 
 interface PixelProps {
@@ -150,8 +161,11 @@ interface DrawingCanvasProps {
   // its size - lets the color picker tell the halves of a half-pixel apart.
   onPixelFill: (key: string, color: string, point?: { x: number; y: number }) => void
   tool: Tool
-  selection: SelectionRect | null
-  onSelectionChange: (rect: SelectionRect | null) => void
+  selection: CellSelection | null
+  // How a new marquee combines with the selection. Holding Shift (add) or
+  // Alt (subtract) when the drag starts overrides it for that drag.
+  selectionMode: SelectionMode
+  onSelectionChange: (selection: CellSelection | null) => void
   onSelectionMoveEnd: (deltaRow: number, deltaCol: number) => void
   // A finished pencil stroke on the active freehand layer.
   onStrokeCommit: (stroke: Stroke) => void
@@ -181,6 +195,7 @@ export default function DrawingCanvas({
   onPixelFill,
   tool,
   selection,
+  selectionMode,
   onSelectionChange,
   onSelectionMoveEnd,
   onStrokeCommit,
@@ -210,11 +225,15 @@ export default function DrawingCanvas({
 
   const [isDrawing, setIsDrawing] = useState(false)
   const [isSelecting, setIsSelecting] = useState(false)
-  const selectStartRef = useRef<{ row: number; col: number } | null>(null)
+  // The marquee being dragged: where it started, the selection it is being
+  // combined with, how, and the cell it last reached.
+  const selectDragRef = useRef<{ row: number; col: number; base: CellSelection | null; mode: SelectionMode; lastRow: number; lastCol: number } | null>(null)
   const [isMovingSelection, setIsMovingSelection] = useState(false)
   const moveStartRef = useRef<{ row: number; col: number } | null>(null)
   const [moveDelta, setMoveDelta] = useState({ dRow: 0, dCol: 0 })
-  const movingSnapshotRef = useRef<string[][] | null>(null)
+  // The active layer's cells over the selection's bounding box when a move
+  // starts; null where a cell isn't selected (it stays put).
+  const movingSnapshotRef = useRef<(string | null)[][] | null>(null)
   // The hole (what's left behind) and the floating preview (what's being
   // dragged) are drawn onto <canvas> elements rather than one <div> per
   // cell - at the max 500x500 canvas size, selecting the whole thing would
@@ -265,24 +284,9 @@ export default function DrawingCanvas({
     return cellGrid[key] || TRANSPARENT
   }
 
-  const getActiveLayerPixelColor = (row: number, col: number): string => {
-    const key = getPixelKey(row, col)
-    // Unlike the base canvas (which sits on an opaque white "paper"), the
-    // moving-selection preview floats above the already-rendered composite,
-    // so an empty active-layer cell must stay see-through here - falling
-    // back to white would paint over whatever's on a layer beneath it.
-    return activeLayerGrid[key] || TRANSPARENT
-  }
-
-  const isInsideSelection = (row: number, col: number): boolean => {
-    if (!selection) return false
-    return (
-      row >= selection.startRow &&
-      row <= selection.endRow &&
-      col >= selection.startCol &&
-      col <= selection.endCol
-    )
-  }
+  // The selection's bounding box - what moving it is clamped by and what the
+  // moving-selection canvases cover.
+  const selectionBox = useMemo(() => (selection ? selectionBounds(selection) : null), [selection])
 
   const handlePixelClick = useCallback((row: number, col: number, point?: { x: number; y: number }) => {
     const key = getPixelKey(row, col)
@@ -354,13 +358,14 @@ export default function DrawingCanvas({
     if (!isMovingSelection || !previewDragFromLayers || !selection) return layers
     if (moveDelta.dRow === 0 && moveDelta.dCol === 0) return layers
     if (activeIsFreehand) {
-      const moved = moveStrokesInRect(activeLayer.strokes ?? [], selection, moveDelta.dRow, moveDelta.dCol, strokeBounds)
+      const moved = moveStrokesInSelection(activeLayer.strokes ?? [], selection, moveDelta.dRow, moveDelta.dCol, strokeBounds)
       return layers.map((layer, i) => (i === activeLayerIndex ? { ...layer, strokes: moved } : layer))
     }
     // The same cell move the drop performs (see handleSelectionMoveEnd).
+    const { startRow, startCol } = selectionBounds(selection)
     const clip = copySelectionCells(activeLayer.grid, selection)
-    const cleared = clearRectFromGrid(activeLayer.grid, selection)
-    const movedGrid = pasteClipboardToGrid(cleared, clip, selection.startRow + moveDelta.dRow, selection.startCol + moveDelta.dCol, canvasWidth, canvasHeight)
+    const cleared = clearSelectionFromGrid(activeLayer.grid, selection)
+    const movedGrid = pasteClipboardToGrid(cleared, clip, startRow + moveDelta.dRow, startCol + moveDelta.dCol, canvasWidth, canvasHeight)
     return layers.map((layer, i) => (i === activeLayerIndex ? { ...layer, grid: movedGrid } : layer))
   }, [isMovingSelection, previewDragFromLayers, activeIsFreehand, selection, moveDelta, layers, activeLayer, activeLayerIndex, strokeBounds, canvasWidth, canvasHeight])
 
@@ -625,29 +630,69 @@ export default function DrawingCanvas({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isLineActive, clearLine])
 
-  const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
-    e.preventDefault()
-    if (isSelectMode) {
-      if (selection && isInsideSelection(row, col)) {
-        // When the drag is previewed from the layers themselves (see
-        // displayLayers) there is no cell snapshot to take.
-        const snapshot: string[][] = []
-        for (let r = selection.startRow; !previewDragFromLayers && r <= selection.endRow; r++) {
-          const rowColors: string[] = []
-          for (let c = selection.startCol; c <= selection.endCol; c++) {
-            rowColors.push(getActiveLayerPixelColor(r, c))
+  // --- Select tool ---
+
+  // Starts a select-tool drag at a cell. In replace mode a drag that starts
+  // on a selected cell moves the selection; anything else draws a marquee
+  // that is combined with the selection as `mode` says - so in add and
+  // subtract mode a drag inside the selection still draws one (that is how
+  // a hole is cut out of it).
+  const beginSelectDrag = useCallback((row: number, col: number, mode: SelectionMode) => {
+    if (mode === 'replace' && selection && isCellSelected(selection, row, col)) {
+      // When the drag is previewed from the layers themselves (see
+      // displayLayers) there is no cell snapshot to take.
+      const snapshot: (string | null)[][] = []
+      if (!previewDragFromLayers) {
+        const bitmap = SelectionBitmap.of(selection)
+        const { startRow, startCol, endRow, endCol } = bitmap.bounds
+        for (let r = startRow; r <= endRow; r++) {
+          const rowColors: (string | null)[] = []
+          for (let c = startCol; c <= endCol; c++) {
+            // Unlike the base canvas (which sits on an opaque white "paper"),
+            // the moving-selection preview floats above the already-rendered
+            // composite, so an empty active-layer cell must stay see-through
+            // here - falling back to white would paint over whatever's on a
+            // layer beneath it.
+            rowColors.push(bitmap.has(r, c) ? activeLayerGrid[getPixelKey(r, c)] || TRANSPARENT : null)
           }
           snapshot.push(rowColors)
         }
-        movingSnapshotRef.current = snapshot
-        moveStartRef.current = { row, col }
-        setMoveDelta({ dRow: 0, dCol: 0 })
-        setIsMovingSelection(true)
-      } else {
-        selectStartRef.current = { row, col }
-        setIsSelecting(true)
-        onSelectionChange(normalizeRect(row, col, row, col))
       }
+      movingSnapshotRef.current = snapshot
+      moveStartRef.current = { row, col }
+      setMoveDelta({ dRow: 0, dCol: 0 })
+      setIsMovingSelection(true)
+      return
+    }
+    selectDragRef.current = { row, col, base: selection, mode, lastRow: row, lastCol: col }
+    setIsSelecting(true)
+    onSelectionChange(combineSelection(selection, normalizeRect(row, col, row, col), mode))
+  }, [selection, previewDragFromLayers, activeLayerGrid, onSelectionChange])
+
+  // Follows the pointer during a select-tool drag: grows the marquee, or
+  // moves the selection (kept on the canvas).
+  const updateSelectDrag = useCallback((row: number, col: number) => {
+    const drag = selectDragRef.current
+    if (isSelecting && drag) {
+      if (drag.lastRow === row && drag.lastCol === col) return
+      drag.lastRow = row
+      drag.lastCol = col
+      onSelectionChange(combineSelection(drag.base, normalizeRect(drag.row, drag.col, row, col), drag.mode))
+    } else if (isMovingSelection && moveStartRef.current && selectionBox) {
+      const rawDRow = row - moveStartRef.current.row
+      const rawDCol = col - moveStartRef.current.col
+      const dRow = Math.max(-selectionBox.startRow, Math.min(dimensions.rows - 1 - selectionBox.endRow, rawDRow))
+      const dCol = Math.max(-selectionBox.startCol, Math.min(dimensions.cols - 1 - selectionBox.endCol, rawDCol))
+      setMoveDelta({ dRow, dCol })
+    }
+  }, [isSelecting, isMovingSelection, selectionBox, dimensions.rows, dimensions.cols, onSelectionChange])
+
+  const handleMouseDown = (e: React.MouseEvent, row: number, col: number) => {
+    e.preventDefault()
+    if (isSelectMode) {
+      // Shift adds and Alt (Option) subtracts for this drag, whatever mode
+      // is chosen - the same keys most drawing programs use.
+      beginSelectDrag(row, col, e.shiftKey ? 'add' : e.altKey ? 'subtract' : selectionMode)
       return
     }
     if (isLineMode) {
@@ -685,17 +730,7 @@ export default function DrawingCanvas({
     if (isSelectMode) {
       if (!isSelecting && !isMovingSelection) return
       const cell = getCellFromPoint(e.clientX, e.clientY)
-      if (!cell) return
-
-      if (isSelecting && selectStartRef.current) {
-        onSelectionChange(normalizeRect(selectStartRef.current.row, selectStartRef.current.col, cell.row, cell.col))
-      } else if (isMovingSelection && moveStartRef.current && selection) {
-        const rawDRow = cell.row - moveStartRef.current.row
-        const rawDCol = cell.col - moveStartRef.current.col
-        const dRow = Math.max(-selection.startRow, Math.min(dimensions.rows - 1 - selection.endRow, rawDRow))
-        const dCol = Math.max(-selection.startCol, Math.min(dimensions.cols - 1 - selection.endCol, rawDCol))
-        setMoveDelta({ dRow, dCol })
-      }
+      if (cell) updateSelectDrag(cell.row, cell.col)
       return
     }
 
@@ -728,7 +763,7 @@ export default function DrawingCanvas({
       setMoveDelta({ dRow: 0, dCol: 0 })
     }
     setIsSelecting(false)
-    selectStartRef.current = null
+    selectDragRef.current = null
   }
 
   const handleMouseUp = () => {
@@ -795,24 +830,8 @@ export default function DrawingCanvas({
       const cell = getCellFromPoint(touch.clientX, touch.clientY)
       if (cell) {
         e.preventDefault()
-        if (selection && isInsideSelection(cell.row, cell.col)) {
-          const snapshot: string[][] = []
-          for (let r = selection.startRow; !previewDragFromLayers && r <= selection.endRow; r++) {
-            const rowColors: string[] = []
-            for (let c = selection.startCol; c <= selection.endCol; c++) {
-              rowColors.push(getActiveLayerPixelColor(r, c))
-            }
-            snapshot.push(rowColors)
-          }
-          movingSnapshotRef.current = snapshot
-          moveStartRef.current = cell
-          setMoveDelta({ dRow: 0, dCol: 0 })
-          setIsMovingSelection(true)
-        } else {
-          selectStartRef.current = cell
-          setIsSelecting(true)
-          onSelectionChange(normalizeRect(cell.row, cell.col, cell.row, cell.col))
-        }
+        // No modifier keys on a touch screen: the mode buttons decide.
+        beginSelectDrag(cell.row, cell.col, selectionMode)
       }
       return
     }
@@ -887,7 +906,7 @@ export default function DrawingCanvas({
         }
       }
     }
-  }, [isSingleClickMode, isSelectMode, isLineMode, updateLinePreview, isFreehandPointerMode, previewDragFromLayers, freehandDown, cancelStroke, pattern, pixelSize, dimensions, handlePixelClick, getPointInCell, zoom, getCellFromPoint, selection, onSelectionChange, activeLayerGrid])
+  }, [isSingleClickMode, isSelectMode, isLineMode, updateLinePreview, isFreehandPointerMode, freehandDown, cancelStroke, pattern, pixelSize, dimensions, handlePixelClick, getPointInCell, zoom, getCellFromPoint, beginSelectDrag, selectionMode])
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     // Handle pinch gesture
@@ -937,16 +956,7 @@ export default function DrawingCanvas({
       const cell = getCellFromPoint(touch.clientX, touch.clientY)
       if (!cell) return
       e.preventDefault()
-
-      if (isSelecting && selectStartRef.current) {
-        onSelectionChange(normalizeRect(selectStartRef.current.row, selectStartRef.current.col, cell.row, cell.col))
-      } else if (isMovingSelection && moveStartRef.current && selection) {
-        const rawDRow = cell.row - moveStartRef.current.row
-        const rawDCol = cell.col - moveStartRef.current.col
-        const dRow = Math.max(-selection.startRow, Math.min(dimensions.rows - 1 - selection.endRow, rawDRow))
-        const dCol = Math.max(-selection.startCol, Math.min(dimensions.cols - 1 - selection.endCol, rawDCol))
-        setMoveDelta({ dRow, dCol })
-      }
+      updateSelectDrag(cell.row, cell.col)
       return
     }
 
@@ -1041,7 +1051,7 @@ export default function DrawingCanvas({
         handlePixelClick(row, col)
       }
     }
-  }, [isDrawing, isSingleClickMode, isSelectMode, isLineMode, updateLinePreview, isFreehandPointerMode, freehandMove, cancelStroke, isSelecting, isMovingSelection, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, selection, onSelectionChange])
+  }, [isDrawing, isSingleClickMode, isSelectMode, isLineMode, updateLinePreview, isFreehandPointerMode, freehandMove, cancelStroke, isSelecting, isMovingSelection, pattern, pixelSize, dimensions, handlePixelClick, zoom, getCellFromPoint, updateSelectDrag])
 
   const handleTouchEnd = useCallback((e?: TouchEvent) => {
     if (isSelectMode) {
@@ -1146,9 +1156,9 @@ export default function DrawingCanvas({
   // repaint cost while dragging - but only for the (cheap) per-cell lookup
   // against dragComposites, not for recomputing it.
   useEffect(() => {
-    if (!isSelectMode || !selection || !isMovingSelection || !dragComposites) return
-    const width = selection.endCol - selection.startCol + 1
-    const height = selection.endRow - selection.startRow + 1
+    if (!isSelectMode || !selectionBox || !isMovingSelection || !dragComposites) return
+    const width = selectionBox.endCol - selectionBox.startCol + 1
+    const height = selectionBox.endRow - selectionBox.startRow + 1
 
     // For the moving-selection "hole": sits on the same opaque white
     // "paper" as the base canvas, so an empty cell here (nothing on any
@@ -1172,25 +1182,31 @@ export default function DrawingCanvas({
     // which can hang or crash the tab on a large selection. See
     // getPreviewCellScale for how many pixels each cell gets.
     const scale = getPreviewCellScale(width, height)
+    // Only the selected cells (non-null in the snapshot) are painted: the
+    // rest of the bounding box stays clear on both canvases, so the cells
+    // that don't move keep showing through from the grid.
+    const snapshot = movingSnapshotRef.current
     const holeCtx = holeCanvasRef.current?.getContext('2d')
-    if (holeCtx) {
+    if (holeCtx && snapshot) {
       holeCtx.imageSmoothingEnabled = false
       holeCtx.clearRect(0, 0, width * scale, height * scale)
-      for (let r = 0; r < height; r++) {
-        for (let c = 0; c < width; c++) {
-          drawCell(holeCtx, getBelowActiveLayerPixelColor(selection.startRow + r, selection.startCol + c), c * scale, r * scale, scale)
-        }
-      }
+      snapshot.forEach((rowColors, r) => {
+        rowColors.forEach((color, c) => {
+          if (color === null) return
+          drawCell(holeCtx, getBelowActiveLayerPixelColor(selectionBox.startRow + r, selectionBox.startCol + c), c * scale, r * scale, scale)
+        })
+      })
     }
 
     const floatingCtx = floatingCanvasRef.current?.getContext('2d')
-    if (floatingCtx && movingSnapshotRef.current) {
+    if (floatingCtx && snapshot) {
       floatingCtx.imageSmoothingEnabled = false
       floatingCtx.clearRect(0, 0, width * scale, height * scale)
-      movingSnapshotRef.current.forEach((rowColors, r) => {
+      snapshot.forEach((rowColors, r) => {
         rowColors.forEach((color, c) => {
-          const destRow = selection.startRow + r + moveDelta.dRow
-          const destCol = selection.startCol + c + moveDelta.dCol
+          if (color === null) return
+          const destRow = selectionBox.startRow + r + moveDelta.dRow
+          const destCol = selectionBox.startCol + c + moveDelta.dCol
           // Previews the real post-drop result at the destination: the
           // non-active layers there, with the dragged cell on top of them,
           // and anything on a layer above the active one still covering it.
@@ -1210,11 +1226,40 @@ export default function DrawingCanvas({
         })
       })
     }
-  }, [isSelectMode, selection, isMovingSelection, dragComposites, pixelSize, moveDelta])
+  }, [isSelectMode, selectionBox, isMovingSelection, dragComposites, pixelSize, moveDelta])
 
-  const previewCellScale = selection
-    ? getPreviewCellScale(selection.endCol - selection.startCol + 1, selection.endRow - selection.startRow + 1)
+  const previewCellScale = selectionBox
+    ? getPreviewCellScale(selectionBox.endCol - selectionBox.startCol + 1, selectionBox.endRow - selectionBox.startRow + 1)
     : 1
+
+  // The selection's border and area as SVG paths, in pixels from the
+  // bounding box's top-left corner. Only while the select tool shows them.
+  const selectionPaths = useMemo(() => {
+    if (!isSelectMode || !selection) return null
+    return { outline: selectionOutlinePath(selection, pixelSize), area: selectionAreaPath(selection, pixelSize) }
+  }, [isSelectMode, selection, pixelSize])
+
+  // Draws the selection's shape at its position, offset by (dRow, dCol) cells.
+  const renderSelectionShape = (className: string, dRow: number, dCol: number, filled: boolean) => {
+    if (!selectionBox || !selectionPaths) return null
+    const width = (selectionBox.endCol - selectionBox.startCol + 1) * pixelSize
+    const height = (selectionBox.endRow - selectionBox.startRow + 1) * pixelSize
+    return (
+      <svg
+        className={className}
+        aria-hidden="true"
+        width={width}
+        height={height}
+        style={{
+          left: `${(selectionBox.startCol + dCol) * pixelSize}px`,
+          top: `${(selectionBox.startRow + dRow) * pixelSize}px`,
+        }}
+      >
+        {filled && <path className={styles.selectionArea} d={selectionPaths.area} />}
+        <path className={styles.selectionEdge} d={selectionPaths.outline} />
+      </svg>
+    )
+  }
 
   const renderSquare = (row: number, col: number) => {
     return (
@@ -1388,21 +1433,12 @@ export default function DrawingCanvas({
               />
             )}
 
-            {isSelectMode && selection && (!isMovingSelection || previewDragFromLayers) && (
-              <div
-                className={styles.selectionMarquee}
-                style={{
-                  // When the drag is previewed from the layers there is no
-                  // floating cell preview, so the marquee itself follows it.
-                  left: `${(selection.startCol + (isMovingSelection ? moveDelta.dCol : 0)) * pixelSize}px`,
-                  top: `${(selection.startRow + (isMovingSelection ? moveDelta.dRow : 0)) * pixelSize}px`,
-                  width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
-                  height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
-                }}
-              />
-            )}
+            {/* When the drag is previewed from the layers there is no
+                floating cell preview, so the marquee itself follows it. */}
+            {isSelectMode && selectionBox && (!isMovingSelection || previewDragFromLayers) &&
+              renderSelectionShape(styles.selectionMarquee, isMovingSelection ? moveDelta.dRow : 0, isMovingSelection ? moveDelta.dCol : 0, true)}
 
-            {isSelectMode && selection && isMovingSelection && !previewDragFromLayers && movingSnapshotRef.current && (
+            {isSelectMode && selectionBox && isMovingSelection && !previewDragFromLayers && movingSnapshotRef.current && (
               <>
                 {/* Renders the other (non-active) layers for this rect onto a
                     canvas - not one <div> per cell - so the hole left by the
@@ -1413,27 +1449,29 @@ export default function DrawingCanvas({
                 <canvas
                   ref={holeCanvasRef}
                   className={styles.selectionHole}
-                  width={(selection.endCol - selection.startCol + 1) * previewCellScale}
-                  height={(selection.endRow - selection.startRow + 1) * previewCellScale}
+                  width={(selectionBox.endCol - selectionBox.startCol + 1) * previewCellScale}
+                  height={(selectionBox.endRow - selectionBox.startRow + 1) * previewCellScale}
                   style={{
-                    left: `${selection.startCol * pixelSize}px`,
-                    top: `${selection.startRow * pixelSize}px`,
-                    width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
-                    height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
+                    left: `${selectionBox.startCol * pixelSize}px`,
+                    top: `${selectionBox.startRow * pixelSize}px`,
+                    width: `${(selectionBox.endCol - selectionBox.startCol + 1) * pixelSize}px`,
+                    height: `${(selectionBox.endRow - selectionBox.startRow + 1) * pixelSize}px`,
                   }}
                 />
+                {renderSelectionShape(styles.selectionHoleOutline, 0, 0, false)}
                 <canvas
                   ref={floatingCanvasRef}
                   className={styles.selectionFloating}
-                  width={(selection.endCol - selection.startCol + 1) * previewCellScale}
-                  height={(selection.endRow - selection.startRow + 1) * previewCellScale}
+                  width={(selectionBox.endCol - selectionBox.startCol + 1) * previewCellScale}
+                  height={(selectionBox.endRow - selectionBox.startRow + 1) * previewCellScale}
                   style={{
-                    left: `${(selection.startCol + moveDelta.dCol) * pixelSize}px`,
-                    top: `${(selection.startRow + moveDelta.dRow) * pixelSize}px`,
-                    width: `${(selection.endCol - selection.startCol + 1) * pixelSize}px`,
-                    height: `${(selection.endRow - selection.startRow + 1) * pixelSize}px`,
+                    left: `${(selectionBox.startCol + moveDelta.dCol) * pixelSize}px`,
+                    top: `${(selectionBox.startRow + moveDelta.dRow) * pixelSize}px`,
+                    width: `${(selectionBox.endCol - selectionBox.startCol + 1) * pixelSize}px`,
+                    height: `${(selectionBox.endRow - selectionBox.startRow + 1) * pixelSize}px`,
                   }}
                 />
+                {renderSelectionShape(styles.selectionFloatingOutline, moveDelta.dRow, moveDelta.dCol, false)}
               </>
             )}
           </div>
