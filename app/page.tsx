@@ -471,19 +471,14 @@ function HomeContent() {
     setTool('draw')
   }
 
+  // The shape menu is shared by the pencil and the line tool: picking a shape
+  // keeps the line tool if that is the one in use, else selects the pencil.
   const handlePixelShapeChange = (shape: PixelShape) => {
     setPixelShape(shape)
-    setTool('draw')
+    if (tool !== 'line') setTool('draw')
   }
 
-  // The line tool paints with the pencil's shape / line width, so picking a
-  // shape from its menu keeps the line tool active.
   const handleLineModeSelect = () => {
-    setTool('line')
-  }
-
-  const handleLinePixelShapeChange = (shape: PixelShape) => {
-    setPixelShape(shape)
     setTool('line')
   }
 
@@ -1522,7 +1517,6 @@ function HomeContent() {
                 freehandPen={freehandPen}
                 isLineMode={tool === 'line'}
                 onLineModeSelect={handleLineModeSelect}
-                onLinePixelShapeChange={handleLinePixelShapeChange}
                 isEraseMode={tool === 'erase'}
                 onEraseModeToggle={handleEraseModeToggle}
                 isColorPickerMode={tool === 'colorPicker'}
@@ -1618,7 +1612,6 @@ function HomeContent() {
                 freehandPen={freehandPen}
                 isLineMode={tool === 'line'}
                 onLineModeSelect={handleLineModeSelect}
-                onLinePixelShapeChange={handleLinePixelShapeChange}
                 isEraseMode={tool === 'erase'}
                 onEraseModeToggle={handleEraseModeToggle}
                 isColorPickerMode={tool === 'colorPicker'}

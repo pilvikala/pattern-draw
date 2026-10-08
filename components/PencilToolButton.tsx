@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
-import { PencilIcon, PixelShapeIcon, StrokeWidthIcon, ChevronDownIcon } from './icons'
+import { PencilIcon, LineIcon, PixelShapeIcon, StrokeWidthIcon, ChevronDownIcon } from './icons'
 import { PIXEL_SHAPES } from '@/lib/cells'
 import type { PixelShape } from '@/lib/cells'
 import styles from './PencilToolButton.module.css'
@@ -19,33 +19,30 @@ export interface FreehandPenSettings {
 interface PencilToolButtonProps {
   isDrawMode: boolean
   onDrawModeSelect: () => void
+  // The line tool sits beside the pencil and shares its menu.
+  isLineMode: boolean
+  onLineModeSelect: () => void
   pixelShape: PixelShape
   onPixelShapeChange: (shape: PixelShape) => void
   // Set while a freehand layer is active.
   freehandPen?: FreehandPenSettings
-  // What the button is, so the line tool can reuse the pencil's menu: the
-  // defaults make it the pencil.
-  icon?: React.ComponentType<{ className?: string }>
-  toolName?: string
-  shortcutKey?: string
   // Styling of the surrounding toolbar, so the pencil matches its sibling tools.
   buttonClassName: string
   activeClassName: string
   iconClassName: string
 }
 
-// The pencil tool button plus a dropdown for the shape it paints: a full
-// pixel or one of the four triangular halves. The line tool uses the same
-// button and menu, as it paints with the same shape / line width.
+// The pencil and line tool buttons plus one dropdown for what they paint: a
+// full pixel or one of the four triangular halves (or the line width on a
+// freehand layer). Both tools use the same setting.
 export default function PencilToolButton({
   isDrawMode,
   onDrawModeSelect,
+  isLineMode,
+  onLineModeSelect,
   pixelShape,
   onPixelShapeChange,
   freehandPen,
-  icon: Icon = PencilIcon,
-  toolName = 'Draw tool',
-  shortcutKey = 'P',
   buttonClassName,
   activeClassName,
   iconClassName,
@@ -123,11 +120,20 @@ export default function PencilToolButton({
       <button
         onClick={onDrawModeSelect}
         className={`${buttonClassName} ${isDrawMode ? activeClassName : ''}`}
-        title={`${toolName} (${shortcutKey}) - ${freehandPen ? 'Freehand' : shapeLabel}`}
-        aria-label={toolName}
+        title={`Draw tool (P) - ${freehandPen ? 'Freehand' : shapeLabel}`}
+        aria-label="Draw tool"
         aria-pressed={isDrawMode}
       >
-        <Icon className={iconClassName} />
+        <PencilIcon className={iconClassName} />
+      </button>
+      <button
+        onClick={onLineModeSelect}
+        className={`${buttonClassName} ${isLineMode ? activeClassName : ''}`}
+        title={`Line tool (L) - click the start, then the end (Esc or right-click to cancel)`}
+        aria-label="Line tool"
+        aria-pressed={isLineMode}
+      >
+        <LineIcon className={iconClassName} />
       </button>
       <button
         ref={toggleRef}

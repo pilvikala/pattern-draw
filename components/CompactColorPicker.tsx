@@ -1,6 +1,6 @@
 'use client'
 
-import { LineIcon, EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
+import { EraserIcon, FillIcon, SelectIcon, CopyIcon, CutIcon, PasteIcon, MirrorIcon } from './icons'
 import PencilToolButton from './PencilToolButton'
 import type { FreehandPenSettings } from './PencilToolButton'
 import type { PixelShape } from '@/lib/cells'
@@ -18,7 +18,6 @@ interface CompactColorPickerProps {
   freehandPen?: FreehandPenSettings
   isLineMode: boolean
   onLineModeSelect: () => void
-  onLinePixelShapeChange: (shape: PixelShape) => void
   isEraseMode: boolean
   onEraseModeToggle: (enabled: boolean) => void
   isColorPickerMode: boolean
@@ -48,7 +47,6 @@ export default function CompactColorPicker({
   freehandPen,
   isLineMode,
   onLineModeSelect,
-  onLinePixelShapeChange,
   isEraseMode,
   onEraseModeToggle,
   isColorPickerMode,
@@ -96,22 +94,11 @@ export default function CompactColorPicker({
       <PencilToolButton
         isDrawMode={isDrawMode}
         onDrawModeSelect={onDrawModeSelect}
+        isLineMode={isLineMode}
+        onLineModeSelect={onLineModeSelect}
         pixelShape={pixelShape}
         onPixelShapeChange={onPixelShapeChange}
         freehandPen={freehandPen}
-        buttonClassName={styles.pickerButton}
-        activeClassName={styles.active}
-        iconClassName={styles.pickerIcon}
-      />
-      <PencilToolButton
-        isDrawMode={isLineMode}
-        onDrawModeSelect={onLineModeSelect}
-        pixelShape={pixelShape}
-        onPixelShapeChange={onLinePixelShapeChange}
-        freehandPen={freehandPen}
-        icon={LineIcon}
-        toolName="Line tool"
-        shortcutKey="L"
         buttonClassName={styles.pickerButton}
         activeClassName={styles.active}
         iconClassName={styles.pickerIcon}
