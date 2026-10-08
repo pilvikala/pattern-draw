@@ -21,6 +21,24 @@ export function PencilIcon({ className }: IconProps) {
   )
 }
 
+export function LineIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M5 19 19 5" />
+      <circle cx="5" cy="19" r="1.5" fill="currentColor" />
+      <circle cx="19" cy="5" r="1.5" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function EraserIcon({ className }: IconProps) {
   return (
     <svg

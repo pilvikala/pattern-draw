@@ -17,6 +17,8 @@ interface ColorPickerProps {
   onPixelShapeChange: (shape: PixelShape) => void
   // Set while a freehand layer is active (see PencilToolButton).
   freehandPen?: FreehandPenSettings
+  isLineMode: boolean
+  onLineModeSelect: () => void
   isEraseMode: boolean
   onEraseModeToggle: (enabled: boolean) => void
   isColorPickerMode: boolean
@@ -44,6 +46,8 @@ export default function ColorPicker({
   pixelShape,
   onPixelShapeChange,
   freehandPen,
+  isLineMode,
+  onLineModeSelect,
   isEraseMode,
   onEraseModeToggle,
   isColorPickerMode,
@@ -103,6 +107,8 @@ export default function ColorPicker({
         <PencilToolButton
           isDrawMode={isDrawMode}
           onDrawModeSelect={onDrawModeSelect}
+          isLineMode={isLineMode}
+          onLineModeSelect={onLineModeSelect}
           pixelShape={pixelShape}
           onPixelShapeChange={onPixelShapeChange}
           freehandPen={freehandPen}

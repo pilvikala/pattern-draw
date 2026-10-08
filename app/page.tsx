@@ -96,6 +96,8 @@ function HomeContent() {
   // momentary, unlike fill/draw which stay selected until changed.
   const previousToolRef = useRef<Tool>('draw')
   const [selection, setSelection] = useState<SelectionRect | null>(null)
+  // A line has been started with the line tool; Escape then cancels it.
+  const [isLineActive, setIsLineActive] = useState(false)
   const [clipboard, setClipboard] = useState<ClipboardData | null>(null)
   const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -469,9 +471,15 @@ function HomeContent() {
     setTool('draw')
   }
 
+  // The shape menu is shared by the pencil and the line tool: picking a shape
+  // keeps the line tool if that is the one in use, else selects the pencil.
   const handlePixelShapeChange = (shape: PixelShape) => {
     setPixelShape(shape)
-    setTool('draw')
+    if (tool !== 'line') setTool('draw')
+  }
+
+  const handleLineModeSelect = () => {
+    setTool('line')
   }
 
   const handleEraseModeToggle = (enabled: boolean) => {
@@ -541,6 +549,21 @@ function HomeContent() {
   const handleStrokeCommit = useCallback((stroke: Stroke) => {
     updateActiveLayerStrokes((prev) => [...prev, stroke], saveToHistoryImmediate)
   }, [saveToHistoryImmediate, updateActiveLayerStrokes])
+
+  // A finished line on a pixel layer: the cells (as "row,col" keys) it covers,
+  // painted with the pencil's color and shape - one undo step for the line.
+  const handleLineCommit = useCallback((keys: string[]) => {
+    const activeGrid = layersRef.current[activeLayerIndexRef.current]?.grid || {}
+    if (keys.every((key) => activeGrid[key] === paintCell(activeGrid[key], selectedColor, pixelShape))) return
+    updateActiveLayerGrid(
+      (prev) => {
+        const next = { ...prev }
+        for (const key of keys) next[key] = paintCell(prev[key], selectedColor, pixelShape)
+        return next
+      },
+      () => { if (!isUndoRedoRef.current) saveToHistoryImmediate() }
+    )
+  }, [selectedColor, pixelShape, saveToHistoryImmediate, updateActiveLayerGrid])
 
   // The eraser on a freehand layer removes whole strokes it touches.
   const handleStrokeErase = useCallback((x: number, y: number, radius: number) => {
@@ -708,8 +731,8 @@ function HomeContent() {
     if (tool === 'fill' && activeIsFreehand) setTool('draw')
   }, [tool, activeIsFreehand])
 
-  // Keyboard shortcuts: undo/redo, tool switching (P/E/F/C/S), pencil shape
-  // (0-4, only while the pencil is active on a pixel layer), line width ([ and
+  // Keyboard shortcuts: undo/redo, tool switching (P/L/E/F/C/S), pencil shape
+  // (0-4, only while the pencil or line tool is active on a pixel layer), line width ([ and
   // ], on a freehand layer) and select-tool actions (copy/cut/paste/mirror/delete/deselect). Ignored while typing in a text input
   // so hex-color and canvas-size fields keep working.
   useEffect(() => {
@@ -750,7 +773,9 @@ function HomeContent() {
           handlePaste()
         }
       } else if (e.key === 'Escape') {
-        if (selection) {
+        // While a line is in progress, Escape belongs to the line (the canvas
+        // cancels it), not to the selection.
+        if (selection && !isLineActive) {
           e.preventDefault()
           handleDeselect()
         }
@@ -760,6 +785,9 @@ function HomeContent() {
       } else if (noModifiers && key === 'p') {
         e.preventDefault()
         handleDrawModeSelect()
+      } else if (noModifiers && key === 'l') {
+        e.preventDefault()
+        handleLineModeSelect()
       } else if (noModifiers && key === 'e') {
         e.preventDefault()
         handleEraseModeToggle(tool !== 'erase')
@@ -776,7 +804,7 @@ function HomeContent() {
         e.preventDefault()
         const step = e.key === ']' ? STROKE_WIDTH_STEP : -STROKE_WIDTH_STEP
         setStrokeWidth((w) => Math.round(Math.max(STROKE_WIDTH_MIN, Math.min(STROKE_WIDTH_MAX, w + step)) * 100) / 100)
-      } else if (noModifiers && tool === 'draw' && !activeIsFreehand) {
+      } else if (noModifiers && (tool === 'draw' || tool === 'line') && !activeIsFreehand) {
         const shortcut = PIXEL_SHAPES.find((s) => s.key === e.key)
         if (shortcut) {
           e.preventDefault()
@@ -787,7 +815,7 @@ function HomeContent() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [tool, activeIsFreehand, selection, clipboard, handleUndo, handleRedo, handleMirror, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleEraseModeToggle, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
+  }, [tool, activeIsFreehand, isLineActive, selection, clipboard, handleUndo, handleRedo, handleMirror, handleCopy, handleCut, handlePaste, handleDeselect, handleDeleteSelection, handleDrawModeSelect, handleLineModeSelect, handleEraseModeToggle, handleFillModeToggle, handleColorPickerModeToggle, handleSelectModeToggle])
 
   // The color a viewer sees at a spot: the topmost visible layer that has
   // paint there - a cell's color (the half under the pointer, for a
@@ -1487,6 +1515,8 @@ function HomeContent() {
                 pixelShape={pixelShape}
                 onPixelShapeChange={handlePixelShapeChange}
                 freehandPen={freehandPen}
+                isLineMode={tool === 'line'}
+                onLineModeSelect={handleLineModeSelect}
                 isEraseMode={tool === 'erase'}
                 onEraseModeToggle={handleEraseModeToggle}
                 isColorPickerMode={tool === 'colorPicker'}
@@ -1524,6 +1554,7 @@ function HomeContent() {
                 canvasHeight={canvasHeight}
                 selectedColor={selectedColor}
                 strokeWidth={strokeWidth}
+                pixelShape={pixelShape}
                 grid={compositeGrid}
                 activeLayerGrid={activeLayer?.grid || {}}
                 layers={layers}
@@ -1534,6 +1565,8 @@ function HomeContent() {
                 onSelectionChange={handleSelectionChange}
                 onSelectionMoveEnd={handleSelectionMoveEnd}
                 onStrokeCommit={handleStrokeCommit}
+                onLineCommit={handleLineCommit}
+                onLineActiveChange={setIsLineActive}
                 onStrokeErase={handleStrokeErase}
               />
             </div>
@@ -1577,6 +1610,8 @@ function HomeContent() {
                 pixelShape={pixelShape}
                 onPixelShapeChange={handlePixelShapeChange}
                 freehandPen={freehandPen}
+                isLineMode={tool === 'line'}
+                onLineModeSelect={handleLineModeSelect}
                 isEraseMode={tool === 'erase'}
                 onEraseModeToggle={handleEraseModeToggle}
                 isColorPickerMode={tool === 'colorPicker'}
