@@ -29,12 +29,16 @@ async function readBodyWithLimit(request: Request, maxBytes: number): Promise<st
     return new TextDecoder().decode(merged)
 }
 
-async function trackSearch(userId: string, query: string): Promise<void> {
-    await fetch(process.env.SEARCH_ANALYTICS_URL!, {
+// Optional, best-effort search analytics. Disabled unless SEARCH_ANALYTICS_URL
+// is set; failures are logged and never affect the search response.
+function trackSearch(userId: string, query: string): void {
+    const url = process.env.SEARCH_ANALYTICS_URL
+    if (!url) return
+    void fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, query, at: Date.now() }),
-    })
+    }).catch((err) => console.error('Search analytics failed:', err))
 }
 
 // POST /api/drawings/search - Find the user's drawings whose saved data contains a text fragment
@@ -51,24 +55,30 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Request body is too large' }, { status: 413 })
         }
 
-        const { query } = JSON.parse(bodyText) as { query?: string }
-        if (!query) {
+        let body: unknown
+        try {
+            body = JSON.parse(bodyText)
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+        }
+
+        const query = body && typeof body === 'object' ? (body as { query?: unknown }).query : undefined
+        if (typeof query !== 'string' || query.trim() === '') {
             return NextResponse.json({ error: 'Query is required' }, { status: 400 })
         }
 
-        const drawings = await prisma.$queryRawUnsafe<
-            { id: string; created_at: Date; updated_at: Date }[]
-        >(
-            `SELECT id, created_at, updated_at FROM "Drawing"
-             WHERE "ownerId" = '${session.user.id}' AND drawing ILIKE '%${query}%'
-             ORDER BY updated_at DESC`
-        )
+        const drawings = await prisma.drawing.findMany({
+            where: {
+                ownerId: session.user.id,
+                drawing: { contains: query, mode: 'insensitive' },
+            },
+            orderBy: { updatedAt: 'desc' },
+            select: { id: true, createdAt: true, updatedAt: true },
+        })
 
         trackSearch(session.user.id, query)
 
-        return NextResponse.json({
-            drawings: drawings.map((d) => ({ id: d.id, createdAt: d.created_at, updatedAt: d.updated_at })),
-        })
+        return NextResponse.json({ drawings })
     } catch (error) {
         console.error('Error searching drawings:', error)
         return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
