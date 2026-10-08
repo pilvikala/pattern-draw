@@ -100,6 +100,16 @@ function HomeContent() {
   const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isSavingCopy, setIsSavingCopy] = useState(false)
+  // Serialized snapshot of the last drawing persisted to the server (manual or
+  // auto save), used to skip autosaves when nothing changed.
+  const lastPersistedRef = useRef<string | null>(null)
+  const autosaveInFlightRef = useRef(false)
+  // Snapshot the server rejected with a non-retryable 4xx (e.g. too large);
+  // not re-uploaded until the drawing changes.
+  const lastRejectedRef = useRef<string | null>(null)
+  // Bumped whenever the current drawing is replaced (new drawing, load) so a
+  // slow autosave response for the previous drawing is discarded, not applied.
+  const drawingGenerationRef = useRef(0)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
   const [showNewDrawingModal, setShowNewDrawingModal] = useState(false)
 
@@ -236,6 +246,10 @@ function HomeContent() {
   // Applies a loaded/decoded DrawingData into state - shared by the
   // localStorage, URL-share, and saved-drawing load effects below.
   const applyLoadedDrawing = (data: DrawingData) => {
+    // Whatever is loaded here (localStorage restore, share link, saved drawing)
+    // is the baseline: autosave waits for the user's first edit instead of
+    // saving content they never touched as a new drawing.
+    lastPersistedRef.current = JSON.stringify(normalizeDrawingData(data))
     setPattern(data.pattern)
     setPixelSize(data.pixelSize)
     setCanvasWidth(data.canvasWidth)
@@ -318,6 +332,7 @@ function HomeContent() {
             if (drawingData) {
               // Already normalized server-side: the GET route reads it via
               // deserializeDrawing, which now always normalizes internally.
+              drawingGenerationRef.current++
               applyLoadedDrawing(drawingData)
               setCurrentDrawingId(drawingId)
             } else {
@@ -864,7 +879,9 @@ function HomeContent() {
     setSelection(null)
     setClipboard(null)
     // Reset currentDrawingId so future saves create a new drawing instead of updating
+    drawingGenerationRef.current++
     setCurrentDrawingId(null)
+    lastPersistedRef.current = null
     // Clear the URL parameter if present
     if (searchParams.get('id')) {
       router.replace(window.location.pathname)
@@ -877,7 +894,9 @@ function HomeContent() {
 
   const handleNewDrawingCopy = () => {
     setShowNewDrawingModal(false)
+    drawingGenerationRef.current++
     setCurrentDrawingId(null)
+    lastPersistedRef.current = null
     if (searchParams.get('id')) {
       router.replace(window.location.pathname)
     }
@@ -1047,10 +1066,74 @@ function HomeContent() {
     })
   }
 
+  // Auto-save the current drawing every minute while signed in. Skips when
+  // nothing changed since the last save, when a manual save is running, and
+  // for a blank never-saved canvas (avoids creating empty drawings).
+  const autosaveStateRef = useRef({ buildDrawingData, currentDrawingId, isSaving, isSavingCopy, router })
+  autosaveStateRef.current = { buildDrawingData, currentDrawingId, isSaving, isSavingCopy, router }
+  const userId = session?.user?.id
+  useEffect(() => {
+    if (!userId) return
+    const interval = setInterval(async () => {
+      const { buildDrawingData: build, currentDrawingId: id, isSaving: saving, isSavingCopy: savingCopy, router: r } = autosaveStateRef.current
+      if (saving || savingCopy || autosaveInFlightRef.current) return
+      // A ?id= drawing is still loading (or failed to): the canvas holds
+      // unrelated local content, so don't persist it as a new drawing.
+      const urlId = new URLSearchParams(window.location.search).get('id')
+      if (urlId && urlId !== id) return
+      const generation = drawingGenerationRef.current
+      const drawingData = build()
+      // Same cap as the API and the localStorage autosave: oversized drawings
+      // would only be rejected by the server.
+      if (totalGridEntryCount(drawingData) > MAX_TOTAL_GRID_ENTRIES) return
+      const snapshot = JSON.stringify(drawingData)
+      if (snapshot === lastPersistedRef.current || snapshot === lastRejectedRef.current) return
+      if (!id && lastPersistedRef.current === null && !drawingData.layers?.some(l => isFreehandLayer(l) ? (l.strokes?.length ?? 0) > 0 : Object.keys(l.grid).length > 0)) return
+      autosaveInFlightRef.current = true
+      try {
+        const response = await fetch(id ? `/api/drawings/${id}` : '/api/drawings', {
+          method: id ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ drawingData }),
+          credentials: 'include',
+        })
+        if (!response.ok) {
+          // Silent. Transient failures retry on the next tick; other 4xx would
+          // fail identically until the drawing changes.
+          if (response.status >= 400 && response.status < 500 && ![401, 408, 429].includes(response.status)) {
+            lastRejectedRef.current = snapshot
+          }
+          return
+        }
+        const created = id ? null : (await response.json()).drawing
+        // The user started a new drawing or loaded another one meanwhile.
+        if (generation !== drawingGenerationRef.current) return
+        lastPersistedRef.current = snapshot
+        if (created) {
+          setCurrentDrawingId(created.id)
+          // Same as save-as-copy: put the id in the URL so a reload reopens
+          // this drawing instead of autosaving a duplicate.
+          loadedDrawingIdRef.current = created.id
+          r.replace(`${window.location.pathname}?id=${created.id}`)
+        }
+      } catch (e) {
+        console.error('Autosave failed', e)
+      } finally {
+        autosaveInFlightRef.current = false
+      }
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [userId])
+
   const handleSave = async () => {
     if (!session?.user?.id) {
       showToast('Please sign in to save drawings', 'error')
       router.push('/auth/signin')
+      return
+    }
+
+    if (autosaveInFlightRef.current) {
+      showToast('Autosave in progress, please try again in a moment', 'error')
       return
     }
 
@@ -1090,6 +1173,7 @@ function HomeContent() {
       }
 
       if (response.ok) {
+        lastPersistedRef.current = JSON.stringify(drawingData)
         if (currentDrawingId) {
           showToast('Drawing updated!', 'success')
         } else {
@@ -1117,6 +1201,11 @@ function HomeContent() {
       return
     }
 
+    if (autosaveInFlightRef.current) {
+      showToast('Autosave in progress, please try again in a moment', 'error')
+      return
+    }
+
     setIsSavingCopy(true)
     try {
       const drawingData = buildDrawingData()
@@ -1140,6 +1229,9 @@ function HomeContent() {
 
       if (response.ok) {
         const { drawing } = await response.json()
+        // Discard any autosave response still in flight for the old binding.
+        drawingGenerationRef.current++
+        lastPersistedRef.current = JSON.stringify(drawingData)
         setCurrentDrawingId(drawing.id)
         // Mark this id as already loaded so the ?id= load effect doesn't
         // refetch it and reset the undo history now that the URL changes.
