@@ -72,6 +72,11 @@ function isValidDrawingId(id: string): boolean {
 
 function HomeContent() {
   const { data: session } = useSession()
+  // Where to go when dropping ?id= from the URL. Without a session, "/" only
+  // shows the editor because of that parameter (see proxy.ts); a bare "/"
+  // would swap the editor for the marketing page, so use /draw instead.
+  const editorPath = () =>
+    window.location.pathname === '/' && !session ? '/draw' : window.location.pathname
   const router = useRouter()
   const searchParams = useSearchParams()
   const { showToast } = useToast()
@@ -334,7 +339,7 @@ function HomeContent() {
     const drawingId = searchParams.get('id')
     if (drawingId && !isValidDrawingId(drawingId)) {
       console.error('Ignoring malformed ?id= drawing parameter')
-      router.replace(window.location.pathname)
+      router.replace(editorPath())
       return
     }
     if (drawingId && session?.user?.id && loadedDrawingIdRef.current !== drawingId) {
@@ -919,7 +924,7 @@ function HomeContent() {
     lastPersistedRef.current = null
     // Clear the URL parameter if present
     if (searchParams.get('id')) {
-      router.replace(window.location.pathname)
+      router.replace(editorPath())
     }
     // Add clear to history immediately (not debounced). layersRef/
     // activeLayerIndexRef are already updated above, so this pushes exactly
@@ -933,7 +938,7 @@ function HomeContent() {
     setCurrentDrawingId(null)
     lastPersistedRef.current = null
     if (searchParams.get('id')) {
-      router.replace(window.location.pathname)
+      router.replace(editorPath())
     }
   }
 
