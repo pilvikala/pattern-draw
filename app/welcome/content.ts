@@ -1,6 +1,6 @@
-// Content for the marketing page (app/welcome). The Google Play links, the
-// testimonial and pricing stay hidden until they are filled in; the hero
-// carousel shows placeholders until its images are added.
+// Content for the marketing page (app/welcome). The Google Play links and the
+// testimonial stay hidden until they are filled in; the hero carousel shows
+// placeholders until its images are added.
 
 // Brand colors from app/globals.css; these only go into inline styles.
 const BG = 'var(--color-surface-hover)'
@@ -12,10 +12,6 @@ const JAA = 'var(--color-jaa)'
 // Link to the Android app. Both "Get it on Google Play" buttons and the footer
 // link are hidden while this is null.
 export const GOOGLE_PLAY_URL: string | null = null
-
-// The pricing section and its nav links are hidden while this is false. Turn it
-// on once the 50-pattern limit and the paid plan exist in the app.
-export const SHOW_PRICING = false
 
 export interface Example {
   title: string

@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { KuvioLogo, KuvioMark } from '@/components/KuvioLogo'
 import { ExampleCarousel } from './ExampleCarousel'
-import { CRAFTS, EXAMPLES, FEATURES, GOOGLE_PLAY_URL, SHOW_PRICING, STEPS, TESTIMONIAL } from './content'
+import { CRAFTS, EXAMPLES, FEATURES, GOOGLE_PLAY_URL, STEPS, TESTIMONIAL } from './content'
 import styles from './page.module.css'
 
 // Visitors without a session see this page at "/" (see proxy.ts).
@@ -33,7 +33,7 @@ export default function WelcomePage() {
         </Link>
         <nav aria-label="Main" className={styles.nav}>
           <a href="#features" className={styles.navLink}>Features</a>
-          {SHOW_PRICING && <a href="#pricing" className={styles.navLink}>Pricing</a>}
+          <a href="#pricing" className={styles.navLink}>Pricing</a>
           <Link href="/auth/signin" className={styles.navLink}>Sign in</Link>
           <Link href="/draw" className={`${styles.button} ${styles.buttonSmall} ${styles.buttonAccent}`}>Start drawing</Link>
         </nav>
@@ -163,47 +163,45 @@ export default function WelcomePage() {
         </div>
       </section>
 
-      {SHOW_PRICING && (
-        <section id="pricing" className={`${styles.bandWhite} ${styles.bandTopOnly}`}>
-          <div className={`${styles.container} ${styles.section}`}>
-            <div className={styles.splitHeading}>
-              <div className={styles.sectionHeading}>
-                <div className={`${styles.eyebrow} ${styles.eyebrowAccent}`}>Pricing</div>
-                <h2 className={styles.sectionTitle}>Free until your pattern library grows.</h2>
-              </div>
-              <p className={styles.splitNote}>You can start drawing without an account. Sign up when you want your patterns saved.</p>
+      <section id="pricing" className={`${styles.bandWhite} ${styles.bandTopOnly}`}>
+        <div className={`${styles.container} ${styles.section}`}>
+          <div className={styles.splitHeading}>
+            <div className={styles.sectionHeading}>
+              <div className={`${styles.eyebrow} ${styles.eyebrowAccent}`}>Pricing</div>
+              <h2 className={styles.sectionTitle}>Free until your pattern library grows.</h2>
             </div>
-            <div className={styles.planGrid}>
-              <div className={`${styles.plan} ${styles.planFree}`}>
-                <div className={styles.planHeading}>
-                  <h3 className={styles.planName}>Free</h3>
-                  <div className={styles.planPrice}><span className={styles.planAmount}>$0</span></div>
-                </div>
-                <ul className={styles.planList}>
-                  <li>Save up to 50 patterns</li>
-                  <li>Square and brick grids, layers and palette</li>
-                  <li>Print, download and share by link</li>
-                </ul>
-                <Link href="/draw" className={`${styles.button} ${styles.buttonOutline} ${styles.planButton}`}>Start drawing</Link>
+            <p className={styles.splitNote}>You can start drawing without an account. Sign up when you want your patterns saved.</p>
+          </div>
+          <div className={styles.planGrid}>
+            <div className={`${styles.plan} ${styles.planFree}`}>
+              <div className={styles.planHeading}>
+                <h3 className={styles.planName}>Free</h3>
+                <div className={styles.planPrice}><span className={styles.planAmount}>$0</span></div>
               </div>
-              <div className={`${styles.plan} ${styles.planPaid}`}>
-                <div className={styles.planHeading}>
-                  <h3 className={styles.planName}>Unlimited</h3>
-                  <div className={styles.planPrice}>
-                    <span className={styles.planAmount}>$2</span>
-                    <span className={styles.planPeriod}>USD / month</span>
-                  </div>
+              <ul className={styles.planList}>
+                <li>Save up to 50 patterns</li>
+                <li>Square and brick grids, layers and palette</li>
+                <li>Print, download and share by link</li>
+              </ul>
+              <Link href="/draw" className={`${styles.button} ${styles.buttonOutline} ${styles.planButton}`}>Start drawing</Link>
+            </div>
+            <div className={`${styles.plan} ${styles.planPaid}`}>
+              <div className={styles.planHeading}>
+                <h3 className={styles.planName}>Unlimited</h3>
+                <div className={styles.planPrice}>
+                  <span className={styles.planAmount}>$2</span>
+                  <span className={styles.planPeriod}>USD / month</span>
                 </div>
-                <ul className={`${styles.planList} ${styles.planListAccent}`}>
-                  <li>Everything in Free</li>
-                  <li>Save as many patterns as you make</li>
-                </ul>
-                <Link href="/auth/signup" className={`${styles.button} ${styles.buttonAccent} ${styles.planButton}`}>Sign up</Link>
               </div>
+              <ul className={`${styles.planList} ${styles.planListAccent}`}>
+                <li>Everything in Free</li>
+                <li>Save as many patterns as you make</li>
+              </ul>
+              <Link href="/auth/signup" className={`${styles.button} ${styles.buttonAccent} ${styles.planButton}`}>Sign up</Link>
             </div>
           </div>
-        </section>
-      )}
+        </div>
+      </section>
 
       <section className={styles.bandDark}>
         <div className={`${styles.container} ${styles.cta}`}>
@@ -229,7 +227,7 @@ export default function WelcomePage() {
         <nav aria-label="Footer" className={styles.footerNav}>
           <Link href="/draw">Open the app</Link>
           {GOOGLE_PLAY_URL && <a href={GOOGLE_PLAY_URL}>Google Play</a>}
-          {SHOW_PRICING && <a href="#pricing">Pricing</a>}
+          <a href="#pricing">Pricing</a>
           <Link href="/auth/signin">Sign in</Link>
         </nav>
         <div>© 2026 Kuvio</div>
