@@ -2,11 +2,12 @@
 // testimonial and pricing stay hidden until they are filled in; the hero
 // carousel shows placeholders until its images are added.
 
-const BG = '#E6E3DB'
-const YO = '#1B1F2A'
-const PUOLUKKA = '#C8324A'
-const LAKKA = '#E89A2C'
-const JAA = '#2F5DA8'
+// Brand colors from app/globals.css; these only go into inline styles.
+const BG = 'var(--color-surface-hover)'
+const YO = 'var(--color-yo)'
+const PUOLUKKA = 'var(--color-puolukka)'
+const LAKKA = 'var(--color-lakka)'
+const JAA = 'var(--color-jaa)'
 
 // Link to the Android app. Both "Get it on Google Play" buttons and the footer
 // link are hidden while this is null.
