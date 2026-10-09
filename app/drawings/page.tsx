@@ -197,7 +197,10 @@ export default function DrawingsPage() {
                                         <button
                                             onClick={() => handleCopy(drawing.id)}
                                             className={styles.copyButton}
-                                            disabled={copyingId === drawing.id}
+                                            // One copy at a time: copyingId only tracks a single
+                                            // request, so letting a second start would re-enable
+                                            // the first card's button while it's still copying.
+                                            disabled={copyingId !== null}
                                         >
                                             {copyingId === drawing.id ? 'Copying...' : 'Copy'}
                                         </button>
