@@ -26,6 +26,7 @@ export default function DrawingsPage() {
     const [previews, setPreviews] = useState<Record<string, string>>({})
     const [loading, setLoading] = useState(true)
     const [deletingId, setDeletingId] = useState<string | null>(null)
+    const [copyingId, setCopyingId] = useState<string | null>(null)
 
     useEffect(() => {
         if (status === 'unauthenticated') {
@@ -86,6 +87,34 @@ export default function DrawingsPage() {
             showToast('Failed to delete drawing', 'error')
         } finally {
             setDeletingId(null)
+        }
+    }
+
+    const handleCopy = async (id: string) => {
+        setCopyingId(id)
+        try {
+            const response = await fetch(`/api/drawings/${id}/copy`, {
+                method: 'POST',
+            })
+
+            if (response.ok) {
+                const { drawing: copy } = (await response.json()) as { drawing: Drawing }
+                // The copy is the most recently updated drawing, so it goes
+                // first to match the list's updatedAt-desc order. Its content
+                // is identical to the source, so the source preview is reused.
+                setDrawings((current) => [copy, ...current])
+                setPreviews((current) =>
+                    current[id] ? { ...current, [copy.id]: current[id] } : current
+                )
+                showToast('Drawing copied', 'success')
+            } else {
+                showToast('Failed to copy drawing', 'error')
+            }
+        } catch (error) {
+            console.error('Error copying drawing:', error)
+            showToast('Failed to copy drawing', 'error')
+        } finally {
+            setCopyingId(null)
         }
     }
 
@@ -165,6 +194,13 @@ export default function DrawingsPage() {
                                         >
                                             Edit
                                         </Link>
+                                        <button
+                                            onClick={() => handleCopy(drawing.id)}
+                                            className={styles.copyButton}
+                                            disabled={copyingId === drawing.id}
+                                        >
+                                            {copyingId === drawing.id ? 'Copying...' : 'Copy'}
+                                        </button>
                                         <button
                                             onClick={() => handleDelete(drawing.id)}
                                             className={styles.deleteButton}
