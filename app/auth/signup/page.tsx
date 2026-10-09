@@ -2,13 +2,11 @@
 
 import { useState } from 'react'
 import { signIn } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { KuvioLogo } from '@/components/KuvioLogo'
 import styles from '../auth.module.css'
 
 export default function SignUpPage() {
-  const router = useRouter()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -54,8 +52,8 @@ export default function SignUpPage() {
       if (result?.error) {
         setError('Account created but sign in failed. Please try signing in.')
       } else {
-        router.push('/')
-        router.refresh()
+        // A full page load, so proxy.ts sees the new session cookie (see SignInForm).
+        window.location.assign('/')
       }
     } catch (err) {
       setError('An error occurred. Please try again.')

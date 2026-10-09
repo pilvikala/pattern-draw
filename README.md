@@ -46,6 +46,12 @@ Existing drawings are unaffected: pixel layers serialize exactly as before, so e
 
 A freehand layer is stored in the same compact `v2` string as any other layer (three `|`-separated fields: name, visibility, content), with content `~;stroke;stroke;...`. The leading `~` marks the layer type and is present even when the layer has no strokes. Each stroke is `colorIndex,width,x0,y0,dx1,dy1,...`: an index into the drawing's shared color palette, then integers in hundredths of a grid cell (the line width, the first point, and each later point as an offset from the previous one). Because stroke entries contain no `:`, an older client that doesn't know about freehand layers skips them and shows an empty layer instead of failing to load the drawing. In JSON (local storage and the save API) a freehand layer is `{ ..., "type": "freehand", "strokes": [{ "color", "width", "points": [x0, y0, x1, y1, ...] }] }`; pixel layers have no `type` field. The format is documented in `lib/serialization.ts` and the limits on strokes in `lib/strokes.ts`.
 
+## Routes
+
+`/` shows the editor to signed-in users and the marketing page (`app/welcome`) to everyone else, without changing the URL. `proxy.ts` makes the call: a visitor with an Auth.js session cookie, or one opening a drawing (`/?drawing=…` or `/?id=…`), gets the editor. The editor is also always at `/draw`, which is where the marketing page's "Start drawing" links go.
+
+Sections of the marketing page that still need content (Google Play link, example carousel, testimonial, pricing) are switched on in `app/welcome/content.ts`.
+
 ## Getting Started
 
 ### Prerequisites
