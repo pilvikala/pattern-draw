@@ -30,11 +30,19 @@ export function ExampleCarousel({ examples }: { examples: Example[] }) {
       <div className={styles.carouselImages}>
         <figure className={styles.carouselFigure}>
           <figcaption className={styles.carouselLabel}>The pattern</figcaption>
-          <img src={example.patternSrc} alt={example.patternAlt} className={styles.carouselImage} />
+          {example.patternSrc ? (
+            <img src={example.patternSrc} alt={example.patternAlt} className={styles.carouselImage} />
+          ) : (
+            <div className={`${styles.carouselPlaceholder} ${styles.carouselPlaceholderGrid}`}>[Kuvio pattern screenshot]</div>
+          )}
         </figure>
         <figure className={styles.carouselFigure}>
           <figcaption className={styles.carouselLabel}>The finished piece</figcaption>
-          <img src={example.photoSrc} alt={example.photoAlt} className={styles.carouselImage} />
+          {example.photoSrc ? (
+            <img src={example.photoSrc} alt={example.photoAlt} className={styles.carouselImage} />
+          ) : (
+            <div className={styles.carouselPlaceholder}>[Photo of the finished piece]</div>
+          )}
         </figure>
       </div>
       <div className={styles.carouselCaption}>

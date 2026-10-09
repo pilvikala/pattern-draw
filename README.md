@@ -50,7 +50,7 @@ A freehand layer is stored in the same compact `v2` string as any other layer (t
 
 `/` shows the editor to signed-in users and the marketing page (`app/welcome`) to everyone else, without changing the URL. `proxy.ts` makes the call: a visitor with an Auth.js session cookie, or one opening a drawing (`/?drawing=…` or `/?id=…`), gets the editor. The editor is also always at `/draw`, which is where the marketing page's "Start drawing" links go.
 
-Sections of the marketing page that still need content (Google Play link, example carousel, testimonial, pricing) are switched on in `app/welcome/content.ts`.
+The marketing page content lives in `app/welcome/content.ts`: the hero carousel shows placeholders until its images are set, and the Google Play link, testimonial and pricing sections stay hidden until they are filled in.
 
 ## Getting Started
 

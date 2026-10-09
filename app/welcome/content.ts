@@ -1,5 +1,6 @@
-// Content for the marketing page (app/welcome). The sections below that still
-// need real content stay hidden on the live page until it is filled in.
+// Content for the marketing page (app/welcome). The Google Play links, the
+// testimonial and pricing stay hidden until they are filled in; the hero
+// carousel shows placeholders until its images are added.
 
 const BG = '#E6E3DB'
 const YO = '#1B1F2A'
@@ -25,13 +26,14 @@ export interface Example {
 }
 
 // The hero carousel: a pattern in Kuvio next to a photo of the finished piece.
-// Images go in public/ (e.g. '/examples/earrings-pattern.png'). The carousel is
-// hidden while this list is empty. Planned examples:
-//   Seed-bead earrings · brick grid · [maker]
-//   Cross-stitch · square grid · [maker]
-//   Colorwork knitting · square grid · [maker]
-//   Bead loom bracelet · square grid · [maker]
-export const EXAMPLES: Example[] = []
+// Images go in public/ (e.g. '/examples/earrings-pattern.png'); an empty src
+// shows a placeholder box in its place.
+export const EXAMPLES: Example[] = [
+  { title: '[Pattern name]', meta: 'Seed-bead earrings · brick grid · [maker]', patternSrc: '', patternAlt: 'Earring pattern in Kuvio', photoSrc: '', photoAlt: 'Finished seed-bead earrings' },
+  { title: '[Pattern name]', meta: 'Cross-stitch · square grid · [maker]', patternSrc: '', patternAlt: 'Cross-stitch pattern in Kuvio', photoSrc: '', photoAlt: 'Finished cross-stitch' },
+  { title: '[Pattern name]', meta: 'Colorwork knitting · square grid · [maker]', patternSrc: '', patternAlt: 'Knitting chart in Kuvio', photoSrc: '', photoAlt: 'Finished knitted piece' },
+  { title: '[Pattern name]', meta: 'Bead loom bracelet · square grid · [maker]', patternSrc: '', patternAlt: 'Bracelet pattern in Kuvio', photoSrc: '', photoAlt: 'Finished bead loom bracelet' },
+]
 
 export interface Testimonial {
   quote: string

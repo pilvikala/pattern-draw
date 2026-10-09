@@ -25,8 +25,6 @@ function PhoneIcon() {
 }
 
 export default function WelcomePage() {
-  const examples = EXAMPLES.filter((e) => e.patternSrc && e.photoSrc)
-
   return (
     <div className={styles.page}>
       <header className={styles.header}>
@@ -63,7 +61,7 @@ export default function WelcomePage() {
             patterns saved.
           </p>
         </div>
-        {examples.length > 0 && <ExampleCarousel examples={examples} />}
+        {EXAMPLES.length > 0 && <ExampleCarousel examples={EXAMPLES} />}
       </section>
 
       <section className={styles.bandWhite}>

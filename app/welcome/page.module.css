@@ -293,6 +293,28 @@
   display: block;
 }
 
+.carouselPlaceholder {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 14px;
+  border: 1.5px dashed var(--color-border-input);
+  background: #EFEDE7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.carouselPlaceholderGrid {
+  background-color: #F7F6F2;
+  background-image: linear-gradient(#E6E3DB 1px, transparent 1px), linear-gradient(90deg, #E6E3DB 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
 .carouselCaption {
   display: flex;
   flex-direction: column;
