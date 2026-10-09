@@ -41,7 +41,6 @@ export default function WelcomePage() {
 
       <section className={`${styles.container} ${styles.hero}`}>
         <div className={styles.heroText}>
-          <div className={styles.eyebrow}>Kuvio is Finnish for “pattern”</div>
           <h1 className={styles.heroTitle}>Plan the pattern before the first stitch.</h1>
           <p className={styles.heroLead}>
             Kuvio is a grid editor for bead weaving, cross-stitch, colorwork and pixel art. Draw on square or brick
