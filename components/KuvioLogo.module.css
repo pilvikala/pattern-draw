@@ -1,0 +1,24 @@
+.lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  line-height: 1;
+  color: var(--color-yo);
+}
+
+.reversed {
+  color: var(--color-lumi);
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-size: 1.34em;
+  font-weight: 800;
+  /* 0.75 x 1.34em = the mark's 1em height, so the lockup stays as tall as the mark. */
+  line-height: 0.75;
+  letter-spacing: -0.045em;
+  /* Bricolage's line box sits slightly high relative to its glyphs; this
+     nudge centers the letters' ink on the mark. */
+  position: relative;
+  top: 0.04em;
+}

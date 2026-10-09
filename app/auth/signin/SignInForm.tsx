@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import styles from './auth.module.css'
+import styles from '../auth.module.css'
 
 const SESSION_EXPIRED_MESSAGE =
   'Your session expired. Please sign in again to save your drawing.'
@@ -62,7 +62,7 @@ export function SignInForm() {
 
   return (
     <>
-      <h1 className={styles.title}>Sign In</h1>
+      <h1 className={styles.title}>Sign in</h1>
       <p className={styles.subtitle}>Sign in to your account to continue</p>
 
       {error && <div className={styles.error}>{error}</div>}
@@ -127,7 +127,7 @@ export function SignInForm() {
           disabled={isLoading}
           className={styles.submitButton}
         >
-          {isLoading ? 'Signing in...' : 'Sign In'}
+          {isLoading ? 'Signing in...' : 'Sign in'}
         </button>
       </form>
 

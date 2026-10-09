@@ -1,6 +1,8 @@
-# Pattern Draw
+<img src="public/kuvio-logo.svg" alt="" height="48">
 
-A pixel art drawing app for creating patterns. Draw on a customizable matrix with different patterns, save colors, and share your creations via URL.
+# Kuvio
+
+*kuvio* — Finnish for "pattern". A pixel art drawing app for creating patterns. Draw on a customizable matrix with different patterns, save colors, and share your creations via URL.
 
 ## Features
 
@@ -63,7 +65,7 @@ Create a `.env` file in the root directory with the following variables:
 
 ```env
 # Database
-DATABASE_URL="postgresql://user:password@localhost:5432/pattern_draw?schema=public"
+DATABASE_URL="postgresql://user:password@localhost:5432/kuvio?schema=public"
 
 # NextAuth
 NEXTAUTH_SECRET="your-secret-key-here-generate-with-openssl-rand-base64-32"
@@ -167,4 +169,17 @@ Make sure to:
 3. Add a Google OAuth redirect URI for each production domain
 4. Run database migrations on your production database
 
+## Brand
 
+Colors and type follow the Kuvio brand guide. The tokens live in `app/globals.css`:
+
+| Token | Name | Hex | Use |
+| --- | --- | --- | --- |
+| `--color-lumi` | Lumi (snow) | `#F3F2EE` | Page ground |
+| `--color-yo` | Yö (night) | `#1B1F2A` | Text, the mark, dark sections |
+| `--color-puolukka` | Puolukka (lingonberry) | `#C8324A` | The one accent: buttons, links |
+| `--color-lakka` | Lakka (cloudberry) | `#E89A2C` | Fills and highlights only, never text |
+| `--color-jaa` | Jää (ice) | `#2F5DA8` | Patterns, illustrations, info states |
+| `--color-kivi` | Kivi (stone) | `#6B6F78` | Secondary text, captions, grid lines |
+
+Typefaces (loaded with `next/font/google`): Bricolage Grotesque for display, Instrument Sans for text, DM Mono for data. The logo is `components/KuvioLogo.tsx`; the favicon is `app/icon.svg`.

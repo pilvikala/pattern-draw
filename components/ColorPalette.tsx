@@ -45,7 +45,7 @@ export default function ColorPalette({
   if (colors.length === 0) {
     return (
       <div className={styles.palette}>
-        <h3 className={styles.title}>Saved Colors</h3>
+        <h3 className={styles.title}>Saved colors</h3>
         <p className={styles.empty}>No saved colors yet. Save colors to build your palette!</p>
       </div>
     )
@@ -53,7 +53,7 @@ export default function ColorPalette({
 
   return (
     <div className={styles.palette}>
-      <h3 className={styles.title}>Saved Colors</h3>
+      <h3 className={styles.title}>Saved colors</h3>
       <div className={styles.colorGrid}>
         {colors.map((color, index) => (
           <div

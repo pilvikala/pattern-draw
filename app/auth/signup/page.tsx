@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import styles from './auth.module.css'
+import { KuvioLogo } from '@/components/KuvioLogo'
+import styles from '../auth.module.css'
 
 export default function SignUpPage() {
   const router = useRouter()
@@ -76,8 +77,11 @@ export default function SignUpPage() {
 
   return (
     <div className={styles.container}>
+      <Link href="/" className={styles.logoLink} aria-label="Kuvio home">
+        <KuvioLogo size={36} />
+      </Link>
       <div className={styles.card}>
-        <h1 className={styles.title}>Sign Up</h1>
+        <h1 className={styles.title}>Sign up</h1>
         <p className={styles.subtitle}>Create an account to save your patterns</p>
 
         {error && <div className={styles.error}>{error}</div>}
@@ -157,7 +161,7 @@ export default function SignUpPage() {
             disabled={isLoading}
             className={styles.submitButton}
           >
-            {isLoading ? 'Creating account...' : 'Sign Up'}
+            {isLoading ? 'Creating account...' : 'Sign up'}
           </button>
         </form>
 

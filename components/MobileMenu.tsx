@@ -90,21 +90,21 @@ export default function MobileMenu({
               </div>
 
               <div className={styles.menuItem}>
-                <label className={styles.label}>Matrix Pattern</label>
+                <label className={styles.label}>Matrix pattern</label>
                 <select
                   value={pattern}
                   onChange={(e) => onPatternChange(e.target.value as MatrixPattern)}
                   className={styles.select}
                 >
-                  <option value="squares">Regular Squares</option>
-                  <option value="bricks">Interleaved (Bricks)</option>
-                  <option value="bricksVertical">Interleaved Vertical</option>
+                  <option value="squares">Regular squares</option>
+                  <option value="bricks">Interleaved (bricks)</option>
+                  <option value="bricksVertical">Interleaved vertical</option>
                 </select>
               </div>
 
               <div className={styles.menuItem}>
                 <label className={styles.label}>
-                  Pixel Size: {pixelSize}px
+                  Pixel size: {pixelSize}px
                 </label>
                 <input
                   type="range"
@@ -118,7 +118,7 @@ export default function MobileMenu({
 
               <div className={styles.menuItem}>
                 <label className={styles.label}>
-                  Canvas Width (pixels)
+                  Canvas width (pixels)
                 </label>
                 <input
                   type="text"
@@ -131,7 +131,7 @@ export default function MobileMenu({
 
               <div className={styles.menuItem}>
                 <label className={styles.label}>
-                  Canvas Height (pixels)
+                  Canvas height (pixels)
                 </label>
                 <input
                   type="text"
@@ -144,18 +144,18 @@ export default function MobileMenu({
 
               <div className={styles.menuItem}>
                 <button onClick={onSetCanvasSize} className={styles.setSizeButton}>
-                  Set Canvas Size
+                  Set canvas size
                 </button>
               </div>
 
               <div className={styles.menuActions}>
                 <button onClick={handleNewDrawing} className={styles.menuButton}>
-                  New Drawing
+                  New drawing
                 </button>
                 {onSave && (
                   <button
                     onClick={onSave}
-                    className={styles.menuButton}
+                    className={`${styles.menuButton} ${styles.primaryButton}`}
                     disabled={isSaving}
                   >
                     {isSaving ? 'Saving...' : 'Save'}
@@ -167,11 +167,11 @@ export default function MobileMenu({
                     className={styles.menuButton}
                     disabled={isSavingCopy}
                   >
-                    {isSavingCopy ? 'Saving...' : 'Save as Copy'}
+                    {isSavingCopy ? 'Saving...' : 'Save as copy'}
                   </button>
                 )}
                 <button onClick={onShare} className={styles.menuButton}>
-                  Share Link
+                  Share link
                 </button>
                 <button onClick={onDownload} className={styles.menuButton}>
                   Download

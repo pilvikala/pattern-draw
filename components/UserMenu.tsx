@@ -47,10 +47,10 @@ export default function UserMenu({ className }: UserMenuProps = {}) {
     return (
       <div className={containerClassName}>
         <Link href="/auth/signin" className={styles.signInButton}>
-          Sign In
+          Sign in
         </Link>
         <Link href="/auth/signup" className={styles.signUpButton}>
-          Sign Up
+          Sign up
         </Link>
       </div>
     )
@@ -106,7 +106,7 @@ export default function UserMenu({ className }: UserMenuProps = {}) {
             onClick={() => setIsOpen(false)}
             className={styles.menuItem}
           >
-            My Drawings
+            My drawings
           </Link>
           <button
             onClick={() => {
@@ -115,7 +115,7 @@ export default function UserMenu({ className }: UserMenuProps = {}) {
             }}
             className={styles.menuItem}
           >
-            Sign Out
+            Sign out
           </button>
         </div>
       )}

@@ -8,6 +8,7 @@ import { deserializeDrawing } from '@/lib/serialization'
 import { generateDrawingPreview } from '@/lib/drawingPreview'
 import type { DrawingData } from '@/lib/types'
 import { useToast } from '@/components/ToastProvider'
+import { KuvioLogo } from '@/components/KuvioLogo'
 import styles from './page.module.css'
 
 interface Drawing {
@@ -112,10 +113,13 @@ export default function DrawingsPage() {
     return (
         <main className={styles.main}>
             <div className={styles.container}>
+                <Link href="/" className={styles.logoLink} aria-label="Kuvio home">
+                    <KuvioLogo size={28} />
+                </Link>
                 <div className={styles.header}>
-                    <h1 className={styles.title}>My Drawings</h1>
+                    <h1 className={styles.title}>My drawings</h1>
                     <Link href="/" className={styles.newButton}>
-                        + New Drawing
+                        + New drawing
                     </Link>
                 </div>
 
@@ -123,7 +127,7 @@ export default function DrawingsPage() {
                     <div className={styles.empty}>
                         <p>No drawings yet. Create your first one!</p>
                         <Link href="/" className={styles.emptyButton}>
-                            Create Drawing
+                            Create drawing
                         </Link>
                     </div>
                 ) : (

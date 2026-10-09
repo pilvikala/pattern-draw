@@ -83,7 +83,7 @@ export default function ColorPicker({
 
   return (
     <div className={styles.colorPicker}>
-      <label className={styles.label}>Selected Color</label>
+      <label className={styles.label}>Selected color</label>
       <div className={styles.controls}>
         <div
           className={styles.colorSwatch}

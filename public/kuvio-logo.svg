@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 35 44" role="img" aria-label="Kuvio">
+  <rect x="0" y="0" width="8" height="8" rx="1.6" fill="#1B1F2A"/>
+  <rect x="27" y="0" width="8" height="8" rx="1.6" fill="#C8324A"/>
+  <rect x="0" y="9" width="8" height="8" rx="1.6" fill="#1B1F2A"/>
+  <rect x="18" y="9" width="8" height="8" rx="1.6" fill="#1B1F2A"/>
+  <rect x="0" y="18" width="8" height="8" rx="1.6" fill="#1B1F2A"/>
+  <rect x="9" y="18" width="8" height="8" rx="1.6" fill="#1B1F2A"/>
+  <rect x="0" y="27" width="8" height="8" rx="1.6" fill="#1B1F2A"/>
+  <rect x="18" y="27" width="8" height="8" rx="1.6" fill="#1B1F2A"/>
+  <rect x="0" y="36" width="8" height="8" rx="1.6" fill="#1B1F2A"/>
+  <rect x="27" y="36" width="8" height="8" rx="1.6" fill="#1B1F2A"/>
+</svg>
