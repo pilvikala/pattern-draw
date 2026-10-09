@@ -4,20 +4,8 @@ import { useState, useEffect } from 'react'
 import { signIn } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import { safeCallbackUrl } from '@/lib/callbackUrl'
 import styles from '../auth.module.css'
-
-// The callback URL comes from the query string, so only follow it within this
-// site: anything else (another origin, a javascript: URL) falls back to "/".
-function safeCallbackUrl(callbackUrl: string | null): string {
-  if (!callbackUrl) return '/'
-  try {
-    const url = new URL(callbackUrl, window.location.origin)
-    if (url.origin !== window.location.origin) return '/'
-    return url.pathname + url.search + url.hash
-  } catch {
-    return '/'
-  }
-}
 
 const SESSION_EXPIRED_MESSAGE =
   'Your session expired. Please sign in again to save your drawing.'
@@ -50,7 +38,7 @@ export function SignInForm() {
       if (result?.error) {
         setError(result.error)
       } else {
-        const callbackUrl = safeCallbackUrl(searchParams.get('callbackUrl'))
+        const callbackUrl = safeCallbackUrl(searchParams.get('callbackUrl'), window.location.origin)
         // A full page load, so proxy.ts sees the new session cookie: "/" may
         // already be in the client router cache as the marketing page.
         window.location.assign(callbackUrl)
