@@ -171,6 +171,7 @@
 }
 
 .editButton,
+.copyButton,
 .deleteButton {
     flex: 1;
     padding: 0.5rem 1rem;
@@ -182,17 +183,22 @@
     border: none;
 }
 
-.editButton {
+.editButton,
+.copyButton {
     background: white;
     color: var(--color-text);
     border: 1px solid var(--color-border-input);
+}
+
+.editButton {
     text-decoration: none;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
-.editButton:hover {
+.editButton:hover,
+.copyButton:hover:not(:disabled) {
     background: var(--color-lumi);
     border-color: var(--color-yo);
 }
@@ -206,6 +212,7 @@
     background: var(--color-danger);
 }
 
+.copyButton:disabled,
 .deleteButton:disabled {
     opacity: 0.6;
     cursor: not-allowed;
@@ -248,6 +255,7 @@
     }
 
     .editButton,
+    .copyButton,
     .deleteButton {
         width: 100%;
     }
